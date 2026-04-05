@@ -30,7 +30,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ansvar-systems/ch-livestock-mcp"
+    "url": "https://github.com/Ansvar-Systems/ch-livestock-mcp"
   },
   "homepage": "https://ansvar.eu/open-agriculture",
   "engines": {
