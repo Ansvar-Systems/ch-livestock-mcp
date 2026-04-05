@@ -1,0 +1,58 @@
+name: Ingest Data
+
+on:
+  schedule:
+    - cron: '0 3 1 */3 *'  # Quarterly: 1st day, every 3 months, 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Ingestion mode'
+        required: false
+        default: 'incremental'
+        type: choice
+        options:
+          - incremental
+          - full
+          - fetch-only
+          - diff-only
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      - name: Run ingestion
+        run: |
+          MODE="${{ inputs.mode || 'incremental' }}"
+          case "$MODE" in
+            full)       npm run ingest:full ;;
+            fetch-only) npm run ingest:fetch ;;
+            diff-only)  npm run ingest:diff ;;
+            *)          npm run ingest ;;
+          esac
+
+      - name: Update coverage.json
+        run: npm run coverage:update
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git diff --quiet data/ && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit updated data
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: ingest data update $(date -u +%Y-%m-%d)"
+          git push

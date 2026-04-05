@@ -1,0 +1,10 @@
+{
+  "name": "io.github.Ansvar-Systems/ch-livestock",
+  "description": "Swiss livestock regulations via MCP -- TSchV welfare standards, RAUS/BTS programmes, TVD movement rules, housing requirements, breed data",
+  "homepage": "https://github.com/Ansvar-Systems/ch-livestock-mcp",
+  "is_official": true,
+  "remote": {
+    "transportType": "streamableHttp",
+    "url": "https://mcp.ansvar.eu/ch-livestock/mcp"
+  }
+}
