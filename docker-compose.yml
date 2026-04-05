@@ -1,0 +1,12 @@
+services:
+  ch-crop-nutrients-mcp:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    read_only: false
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped

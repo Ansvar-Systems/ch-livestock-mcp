@@ -1,0 +1,29 @@
+# Data sources for ch-crop-nutrients-mcp
+sources:
+  - name: GRUD 2017
+    authority: Agroscope
+    url: https://www.agroscope.admin.ch/agroscope/de/home/themen/pflanzenbau/duengung.html
+    license: Swiss Federal Administration — free reuse
+    update_frequency: periodic (major revision ~10 years)
+    last_retrieved: "2026-04-05"
+
+  - name: Suisse-Bilanz Wegleitung
+    authority: Bundesamt fuer Landwirtschaft (BLW)
+    url: https://www.blw.admin.ch/blw/de/home/instrumente/direktzahlungen/oekologischer-leistungsnachweis.html
+    license: Swiss Federal Administration — free reuse
+    update_frequency: annual (with DZV updates)
+    last_retrieved: "2026-04-05"
+
+  - name: swiss granum Richtpreise
+    authority: swiss granum / SBV
+    url: https://www.swissgranum.ch/richtpreise
+    license: Public price information
+    update_frequency: annual (harvest season)
+    last_retrieved: "2026-04-05"
+
+  - name: swisspatat Richtpreise
+    authority: swisspatat
+    url: https://www.swisspatat.ch
+    license: Public price information
+    update_frequency: seasonal
+    last_retrieved: "2026-04-05"

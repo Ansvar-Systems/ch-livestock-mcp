@@ -1,0 +1,20 @@
+{
+  "server": "ch-crop-nutrients-mcp",
+  "jurisdiction": "CH",
+  "version": "0.1.0",
+  "last_ingest": "2026-04-05",
+  "data": {
+    "crops": 18,
+    "soil_types": 10,
+    "nutrient_recommendations": 15,
+    "manure_values": 11,
+    "commodity_prices": 12
+  },
+  "tools": 11,
+  "sources": [
+    "GRUD 2017 (Agroscope)",
+    "Suisse-Bilanz Wegleitung (BLW)",
+    "AGRIDEA",
+    "SBV/swiss granum"
+  ]
+}
