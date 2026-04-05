@@ -2,7 +2,7 @@
   "name": "@ansvar/ch-livestock-mcp",
   "mcpName": "io.github.ansvar-systems/ch-livestock-mcp",
   "version": "0.1.0",
-  "description": "Swiss crop nutrient recommendations via MCP -- GRUD data, Suisse-Bilanz, soil types, NPK planning, commodity prices",
+  "description": "Swiss livestock regulations via MCP -- TSchV welfare standards, RAUS/BTS programmes, TVD movement rules, housing requirements, breed data",
   "type": "module",
   "main": "dist/server.js",
   "bin": {
@@ -25,7 +25,7 @@
     "freshness:check": "tsx scripts/check-freshness.ts",
     "coverage:update": "tsx scripts/update-coverage.ts"
   },
-  "keywords": ["mcp", "agriculture", "nutrients", "grud", "farming", "crop-science", "switzerland"],
+  "keywords": ["mcp", "agriculture", "livestock", "animal-welfare", "tierschutz", "farming", "switzerland"],
   "author": "Ansvar Systems <info@ansvar.eu>",
   "license": "Apache-2.0",
   "repository": {

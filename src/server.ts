@@ -11,14 +11,14 @@ import { createDatabase } from './db.js';
 import { handleAbout } from './tools/about.js';
 import { handleListSources } from './tools/list-sources.js';
 import { handleCheckFreshness } from './tools/check-freshness.js';
-import { handleSearchCropRequirements } from './tools/search-crop-requirements.js';
-import { handleGetNutrientPlan } from './tools/get-nutrient-plan.js';
-import { handleGetSoilClassification } from './tools/get-soil-classification.js';
-import { handleListCrops } from './tools/list-crops.js';
-import { handleGetCropDetails } from './tools/get-crop-details.js';
-import { handleGetCommodityPrice } from './tools/get-commodity-price.js';
-import { handleCalculateMargin } from './tools/calculate-margin.js';
-import { handleGetManureValues } from './tools/get-manure-values.js';
+import { handleSearchLivestockGuidance } from './tools/search-livestock-guidance.js';
+import { handleGetWelfareStandards } from './tools/get-welfare-standards.js';
+import { handleGetStockingDensity } from './tools/get-stocking-density.js';
+import { handleGetFeedRequirements } from './tools/get-feed-requirements.js';
+import { handleSearchAnimalHealth } from './tools/search-animal-health.js';
+import { handleGetHousingRequirements } from './tools/get-housing-requirements.js';
+import { handleGetMovementRules } from './tools/get-movement-rules.js';
+import { handleGetBreedingGuidance } from './tools/get-breeding-guidance.js';
 
 const SERVER_NAME = 'ch-livestock-mcp';
 const SERVER_VERSION = '0.1.0';
@@ -40,13 +40,13 @@ const TOOLS = [
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
-    name: 'search_crop_requirements',
-    description: 'Search crop nutrient requirements, soil data, and recommendations. Use for broad queries about Swiss crops and nutrients.',
+    name: 'search_livestock_guidance',
+    description: 'Search across all Swiss livestock topics: welfare, housing, feeding, health, transport, breeds. Use for broad queries about Swiss livestock regulations and guidance.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Free-text search query (German, French, or English)' },
-        crop_group: { type: 'string', description: 'Filter by crop group (e.g. getreide, oelsaaten, hackfruechte)' },
+        query: { type: 'string', description: 'Free-text search query (German or English)' },
+        species: { type: 'string', description: 'Filter by species (e.g. Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
         limit: { type: 'number', description: 'Max results (default: 20, max: 50)' },
       },
@@ -54,147 +54,150 @@ const TOOLS = [
     },
   },
   {
-    name: 'get_nutrient_plan',
-    description: 'Get NPK+Mg fertiliser recommendation for a specific crop and soil type. Based on GRUD (Agroscope).',
+    name: 'get_welfare_standards',
+    description: 'Get legal minimum welfare requirements and RAUS/BTS programme standards for a species. Based on TSchV and DZV.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        crop: { type: 'string', description: 'Crop ID or name (e.g. winterweizen, winterraps)' },
-        soil_type: { type: 'string', description: 'Soil type ID or name (e.g. mittlerer-lehm)' },
-        altitude_zone: { type: 'string', description: 'Altitude zone: talzone, huegelzone, bergzone_i-iv (default: talzone)' },
-        previous_crop: { type: 'string', description: 'Previous crop group for rotation adjustment' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        production_system: { type: 'string', description: 'Production system filter (e.g. TSchV-Minimum, RAUS, BTS)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
-      required: ['crop', 'soil_type'],
+      required: ['species'],
     },
   },
   {
-    name: 'get_soil_classification',
-    description: 'Get soil group, characteristics, pH class, and drainage for a Swiss soil type.',
+    name: 'get_stocking_density',
+    description: 'Get animals per m2 and space requirements by species, age class, and housing type. Based on TSchV Anhang 1.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        soil_type: { type: 'string', description: 'Soil type ID or name' },
-        texture: { type: 'string', description: 'Soil texture (e.g. lehm, ton, sand)' },
-        ph_class: { type: 'string', description: 'pH class (A-E)' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        age_class: { type: 'string', description: 'Age/weight class (e.g. Milchkuh, Kalb, Mastschwein >60kg, Legehenne)' },
+        housing_type: { type: 'string', description: 'Housing type (e.g. Laufstall, Anbindestall, Voliere, Freilandhaltung)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
+      required: ['species'],
     },
   },
   {
-    name: 'list_crops',
-    description: 'List all crops in the database, optionally filtered by crop group.',
+    name: 'get_feed_requirements',
+    description: 'Get nutritional requirements per species and production stage. Includes GMF (graslandbasierte Milch- und Fleischproduktion) programme details.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        crop_group: { type: 'string', description: 'Filter by crop group (e.g. getreide)' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        age_class: { type: 'string', description: 'Age class (e.g. Milchkuh, Aufzuchtrind, Mastschwein, Legehenne)' },
+        production_stage: { type: 'string', description: 'Production stage (e.g. Laktation, Trockenstehend, Mast, Aufzucht)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
+      required: ['species'],
     },
   },
   {
-    name: 'get_crop_details',
-    description: 'Get full profile for a crop: GRUD nutrient norms, typical yields, growth stages.',
+    name: 'search_animal_health',
+    description: 'Search animal health topics: diseases, symptoms, prevention, regulatory reporting requirements.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        crop: { type: 'string', description: 'Crop ID or name' },
+        query: { type: 'string', description: 'Search query (e.g. Salmonellen, BVD, Moderhinke, Mastitits)' },
+        species: { type: 'string', description: 'Filter by species' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
-      required: ['crop'],
+      required: ['query'],
     },
   },
   {
-    name: 'get_commodity_price',
-    description: 'Get latest Swiss commodity price for a crop. Warns if data is stale (>14 days).',
+    name: 'get_housing_requirements',
+    description: 'Get detailed housing specifications: space, ventilation, flooring, temperature. Compares TSchV minimum vs. BTS standard.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        crop: { type: 'string', description: 'Crop ID or name' },
-        market: { type: 'string', description: 'Market type (e.g. produzentenpreis, franko-muehle)' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        age_class: { type: 'string', description: 'Age class (e.g. Milchkuh, Mastschwein, Legehenne)' },
+        system: { type: 'string', description: 'Housing system (e.g. Laufstall, Anbindestall, Voliere, BTS)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
-      required: ['crop'],
+      required: ['species'],
     },
   },
   {
-    name: 'calculate_margin',
-    description: 'Estimate gross margin for a crop. Uses current commodity price if price_per_tonne not provided.',
+    name: 'get_movement_rules',
+    description: 'Get TVD registration, transport regulations, standstill rules, and Soemmerung/Alpung requirements per species.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        crop: { type: 'string', description: 'Crop ID or name' },
-        yield_t_ha: { type: 'number', description: 'Expected yield in tonnes per hectare' },
-        price_per_tonne: { type: 'number', description: 'Override price (CHF/t). If omitted, uses latest market price.' },
-        input_costs: { type: 'number', description: 'Total input costs per hectare (CHF). Default: 0' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        rule_type: { type: 'string', description: 'Rule type: TVD, Transport, Soemmerung, Schlachtung' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
-      required: ['crop', 'yield_t_ha'],
+      required: ['species'],
     },
   },
   {
-    name: 'get_manure_values',
-    description: 'Get manure nutrient content (N, P2O5, K2O) per GVE by animal category and housing system. Based on GRUD manure tables.',
+    name: 'get_breeding_guidance',
+    description: 'Get Swiss breed information, breeding calendars, AI (kuenstliche Besamung), genetics, and Soemmerung guidance.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        animal_category: { type: 'string', description: 'Animal category (e.g. milchkuh, mastschwein, legehenne)' },
-        housing_system: { type: 'string', description: 'Housing system (e.g. laufstall, anbindestall)' },
+        species: { type: 'string', description: 'Species: Rinder, Schweine, Schafe, Ziegen, Pferde' },
+        topic: { type: 'string', description: 'Topic filter (e.g. Zweinutzung, Milch, Fleisch, Alp)' },
         jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
       },
+      required: ['species'],
     },
   },
 ];
 
 const SearchArgsSchema = z.object({
   query: z.string(),
-  crop_group: z.string().optional(),
+  species: z.string().optional(),
   jurisdiction: z.string().optional(),
   limit: z.number().optional(),
 });
 
-const NutrientPlanArgsSchema = z.object({
-  crop: z.string(),
-  soil_type: z.string(),
-  altitude_zone: z.string().optional(),
-  previous_crop: z.string().optional(),
+const WelfareArgsSchema = z.object({
+  species: z.string(),
+  production_system: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const SoilArgsSchema = z.object({
-  soil_type: z.string().optional(),
-  texture: z.string().optional(),
-  ph_class: z.string().optional(),
+const StockingArgsSchema = z.object({
+  species: z.string(),
+  age_class: z.string().optional(),
+  housing_type: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const ListCropsArgsSchema = z.object({
-  crop_group: z.string().optional(),
+const FeedArgsSchema = z.object({
+  species: z.string(),
+  age_class: z.string().optional(),
+  production_stage: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const CropDetailsArgsSchema = z.object({
-  crop: z.string(),
+const HealthSearchArgsSchema = z.object({
+  query: z.string(),
+  species: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const PriceArgsSchema = z.object({
-  crop: z.string(),
-  market: z.string().optional(),
+const HousingArgsSchema = z.object({
+  species: z.string(),
+  age_class: z.string().optional(),
+  system: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const MarginArgsSchema = z.object({
-  crop: z.string(),
-  yield_t_ha: z.number(),
-  price_per_tonne: z.number().optional(),
-  input_costs: z.number().optional(),
+const MovementArgsSchema = z.object({
+  species: z.string(),
+  rule_type: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
-const ManureArgsSchema = z.object({
-  animal_category: z.string().optional(),
-  housing_system: z.string().optional(),
+const BreedingArgsSchema = z.object({
+  species: z.string(),
+  topic: z.string().optional(),
   jurisdiction: z.string().optional(),
 });
 
@@ -226,22 +229,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return textResult(handleListSources(db));
       case 'check_data_freshness':
         return textResult(handleCheckFreshness(db));
-      case 'search_crop_requirements':
-        return textResult(handleSearchCropRequirements(db, SearchArgsSchema.parse(args)));
-      case 'get_nutrient_plan':
-        return textResult(handleGetNutrientPlan(db, NutrientPlanArgsSchema.parse(args)));
-      case 'get_soil_classification':
-        return textResult(handleGetSoilClassification(db, SoilArgsSchema.parse(args)));
-      case 'list_crops':
-        return textResult(handleListCrops(db, ListCropsArgsSchema.parse(args)));
-      case 'get_crop_details':
-        return textResult(handleGetCropDetails(db, CropDetailsArgsSchema.parse(args)));
-      case 'get_commodity_price':
-        return textResult(handleGetCommodityPrice(db, PriceArgsSchema.parse(args)));
-      case 'calculate_margin':
-        return textResult(handleCalculateMargin(db, MarginArgsSchema.parse(args)));
-      case 'get_manure_values':
-        return textResult(handleGetManureValues(db, ManureArgsSchema.parse(args)));
+      case 'search_livestock_guidance':
+        return textResult(handleSearchLivestockGuidance(db, SearchArgsSchema.parse(args)));
+      case 'get_welfare_standards':
+        return textResult(handleGetWelfareStandards(db, WelfareArgsSchema.parse(args)));
+      case 'get_stocking_density':
+        return textResult(handleGetStockingDensity(db, StockingArgsSchema.parse(args)));
+      case 'get_feed_requirements':
+        return textResult(handleGetFeedRequirements(db, FeedArgsSchema.parse(args)));
+      case 'search_animal_health':
+        return textResult(handleSearchAnimalHealth(db, HealthSearchArgsSchema.parse(args)));
+      case 'get_housing_requirements':
+        return textResult(handleGetHousingRequirements(db, HousingArgsSchema.parse(args)));
+      case 'get_movement_rules':
+        return textResult(handleGetMovementRules(db, MovementArgsSchema.parse(args)));
+      case 'get_breeding_guidance':
+        return textResult(handleGetBreedingGuidance(db, BreedingArgsSchema.parse(args)));
       default:
         return errorResult(`Unknown tool: ${name}`);
     }

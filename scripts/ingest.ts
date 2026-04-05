@@ -1,13 +1,14 @@
 /**
- * Switzerland Crop Nutrients MCP — Data Ingestion Script
+ * Switzerland Livestock MCP — Data Ingestion Script
  *
- * Populates the database with Swiss crop nutrient data from:
- * - GRUD 2017 (Agroscope) — Duengungsnormen, Naehrstoffbedarf pro Kultur
- * - Suisse-Bilanz Wegleitung (BLW) — Betriebsbilanz, Korrekturfaktoren
- * - AGRIDEA — Duengungsplanung, kantonale Empfehlungen
- * - SBV / BLW — Produzentenpreise, Marktbeobachtung
- * - GRUD Kapitel 10 — Naehrstoffgehalte Hofduenger
+ * Populates the database with Swiss livestock data from:
+ * - TSchV (Tierschutzverordnung, SR 455.1) — Mindestanforderungen pro Tierart
+ * - DZV (Direktzahlungsverordnung) — RAUS/BTS-Programme, Tierwohlbeitraege
+ * - TVD (Tierverkehrsdatenbank) — Registrierung, Meldepflicht, Transport
+ * - Zuchtorganisationen — Braunvieh Schweiz, swissherdbook, Mutterkuh Schweiz, Suisseporcs
+ * - BLV Fachinformationen — Tiergesundheit, Schlachtung, Soemmerung
  *
+ * All data in German (primary federal language for agricultural regulation).
  * Usage: npm run ingest
  */
 
@@ -20,542 +21,533 @@ const db = createDatabase('data/database.db');
 const now = new Date().toISOString().split('T')[0];
 
 // ---------------------------------------------------------------------------
-// 1. Crops — Swiss arable, forage, root crops, permanent grassland
-//    Sources: GRUD 2017 (Agroscope), DZV Anhang, AGRIDEA Deckungsbeitraege
+// Helper: batch insert
 // ---------------------------------------------------------------------------
-
-interface Crop {
-  id: string;
-  name: string;
-  crop_group: string;
-  typical_yield_t_ha: number;
-  nutrient_offtake_n: number;
-  nutrient_offtake_p2o5: number;
-  nutrient_offtake_k2o: number;
-  growth_stages: string[];
-  altitude_zone: string;
+function batchInsert(table: string, columns: string[], rows: unknown[][]) {
+  const placeholders = columns.map(() => '?').join(', ');
+  const stmt = db.instance.prepare(
+    `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`
+  );
+  const insertMany = db.instance.transaction((data: unknown[][]) => {
+    for (const row of data) {
+      stmt.run(...row);
+    }
+  });
+  insertMany(rows);
 }
 
-const crops: Crop[] = [
-  // --- Getreide (Talzone) ---
-  {
-    id: 'winterweizen',
-    name: 'Winterweizen',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 6.5,
-    nutrient_offtake_n: 130,
-    nutrient_offtake_p2o5: 52,
-    nutrient_offtake_k2o: 39,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Bluete', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'sommerweizen',
-    name: 'Sommerweizen',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 5.5,
-    nutrient_offtake_n: 110,
-    nutrient_offtake_p2o5: 44,
-    nutrient_offtake_k2o: 33,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Bluete', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'wintergerste',
-    name: 'Wintergerste',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 6.0,
-    nutrient_offtake_n: 108,
-    nutrient_offtake_p2o5: 48,
-    nutrient_offtake_k2o: 42,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'sommergerste',
-    name: 'Sommergerste',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 5.0,
-    nutrient_offtake_n: 85,
-    nutrient_offtake_p2o5: 40,
-    nutrient_offtake_k2o: 35,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'winterraps',
-    name: 'Winterraps',
-    crop_group: 'oelsaaten',
-    typical_yield_t_ha: 3.5,
-    nutrient_offtake_n: 140,
-    nutrient_offtake_p2o5: 56,
-    nutrient_offtake_k2o: 49,
-    growth_stages: ['Rosette', 'Streckung', 'Knospe', 'Bluete', 'Schote', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'sonnenblumen',
-    name: 'Sonnenblumen',
-    crop_group: 'oelsaaten',
-    typical_yield_t_ha: 3.0,
-    nutrient_offtake_n: 105,
-    nutrient_offtake_p2o5: 42,
-    nutrient_offtake_k2o: 105,
-    growth_stages: ['Auflaufen', 'Rosette', 'Stengel', 'Knospe', 'Bluete', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'koernermais',
-    name: 'Koernermais',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 10.0,
-    nutrient_offtake_n: 140,
-    nutrient_offtake_p2o5: 65,
-    nutrient_offtake_k2o: 50,
-    growth_stages: ['Auflaufen', '4-6 Blatt', 'Schossen', 'Fahnenschieben', 'Bluete', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'silomais',
-    name: 'Silomais',
-    crop_group: 'futterbau',
-    typical_yield_t_ha: 17.0,
-    nutrient_offtake_n: 170,
-    nutrient_offtake_p2o5: 68,
-    nutrient_offtake_k2o: 204,
-    growth_stages: ['Auflaufen', '4-6 Blatt', 'Schossen', 'Fahnenschieben', 'Bluete', 'Teigreife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'kartoffeln',
-    name: 'Kartoffeln',
-    crop_group: 'hackfruechte',
-    typical_yield_t_ha: 40.0,
-    nutrient_offtake_n: 160,
-    nutrient_offtake_p2o5: 32,
-    nutrient_offtake_k2o: 200,
-    growth_stages: ['Auflaufen', 'Stauden', 'Bluete', 'Krautabsterben', 'Ernte'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'zuckerrueben',
-    name: 'Zuckerrueben',
-    crop_group: 'hackfruechte',
-    typical_yield_t_ha: 75.0,
-    nutrient_offtake_n: 150,
-    nutrient_offtake_p2o5: 53,
-    nutrient_offtake_k2o: 225,
-    growth_stages: ['Auflaufen', '4-Blatt', 'Reihenschluss', 'Wachstum', 'Zuckereinlagerung', 'Ernte'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'kunstwiese-3j',
-    name: 'Kunstwiese 3-jaehrig',
-    crop_group: 'futterbau',
-    typical_yield_t_ha: 12.0,
-    nutrient_offtake_n: 240,
-    nutrient_offtake_p2o5: 72,
-    nutrient_offtake_k2o: 264,
-    growth_stages: ['1. Schnitt', '2. Schnitt', '3. Schnitt', '4. Schnitt'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'naturwiese-intensiv',
-    name: 'Naturwiese intensiv',
-    crop_group: 'futterbau',
-    typical_yield_t_ha: 10.0,
-    nutrient_offtake_n: 180,
-    nutrient_offtake_p2o5: 60,
-    nutrient_offtake_k2o: 220,
-    growth_stages: ['1. Schnitt', '2. Schnitt', '3. Schnitt', '4. Schnitt'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'naturwiese-mittelintensiv',
-    name: 'Naturwiese mittelintensiv',
-    crop_group: 'futterbau',
-    typical_yield_t_ha: 7.5,
-    nutrient_offtake_n: 120,
-    nutrient_offtake_p2o5: 45,
-    nutrient_offtake_k2o: 165,
-    growth_stages: ['1. Schnitt', '2. Schnitt', '3. Schnitt'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'naturwiese-extensiv',
-    name: 'Naturwiese extensiv (BFF)',
-    crop_group: 'futterbau',
-    typical_yield_t_ha: 4.0,
-    nutrient_offtake_n: 0,
-    nutrient_offtake_p2o5: 0,
-    nutrient_offtake_k2o: 0,
-    growth_stages: ['1. Schnitt (ab 15.6.)', '2. Schnitt'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'dinkel',
-    name: 'Dinkel',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 4.5,
-    nutrient_offtake_n: 100,
-    nutrient_offtake_p2o5: 41,
-    nutrient_offtake_k2o: 32,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Bluete', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'triticale',
-    name: 'Triticale',
-    crop_group: 'getreide',
-    typical_yield_t_ha: 6.0,
-    nutrient_offtake_n: 108,
-    nutrient_offtake_p2o5: 48,
-    nutrient_offtake_k2o: 42,
-    growth_stages: ['Bestockung', 'Schossen', 'Aehrenschieben', 'Kornfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'koernereiweisserbsen',
-    name: 'Eiweisserbsen',
-    crop_group: 'koernerleguminosen',
-    typical_yield_t_ha: 3.5,
-    nutrient_offtake_n: 0,
-    nutrient_offtake_p2o5: 35,
-    nutrient_offtake_k2o: 42,
-    growth_stages: ['Auflaufen', 'Verzweigung', 'Bluete', 'Huelsenfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
-  {
-    id: 'sojabohnen',
-    name: 'Sojabohnen',
-    crop_group: 'koernerleguminosen',
-    typical_yield_t_ha: 3.0,
-    nutrient_offtake_n: 0,
-    nutrient_offtake_p2o5: 42,
-    nutrient_offtake_k2o: 48,
-    growth_stages: ['Auflaufen', 'Verzweigung', 'Bluete', 'Huelsenfuellung', 'Reife'],
-    altitude_zone: 'talzone',
-  },
+// ---------------------------------------------------------------------------
+// 1. Welfare Standards — TSchV Mindestanforderungen + RAUS + BTS
+// ---------------------------------------------------------------------------
+
+interface WelfareStandard {
+  species: string;
+  production_system: string;
+  requirement: string;
+  min_space_m2: number | null;
+  details: string;
+}
+
+const welfareStandards: WelfareStandard[] = [
+  // --- Rinder ---
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Liegeflaeche Milchkuh Laufstall', min_space_m2: 4.5, details: 'TSchV Anhang 1, Tab. 1: Mindestflaeche Liegebereich pro Milchkuh im Laufstall. Anbindehaltung weiterhin erlaubt mit RAUS-Auslauf.' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Liegeflaeche Mutterkuh Laufstall', min_space_m2: 4.5, details: 'TSchV Anhang 1: Mutterkühe gleicher Platzbedarf wie Milchkuehe im Laufstall.' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Liegeflaeche Aufzuchtrind >400kg', min_space_m2: 3.5, details: 'TSchV Anhang 1: Aufzuchtrinder ueber 400 kg Lebendgewicht.' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Liegeflaeche Aufzuchtrind 200-400kg', min_space_m2: 2.5, details: 'TSchV Anhang 1: Aufzuchtrinder 200-400 kg Lebendgewicht.' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Liegeflaeche Kalb <200kg', min_space_m2: 1.5, details: 'TSchV Anhang 1: Kaelber bis 200 kg. Einzelhaltung nur erste 2 Wochen erlaubt, danach Gruppenhaltung obligatorisch.' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Anbindehaltung Milchkuh', min_space_m2: null, details: 'Anbindehaltung noch erlaubt (TSchV Art. 39). RAUS-Auslauf obligatorisch: mind. 90 Tage Weide (1.5.-31.10.) + 30 Halbtage Winter. Standlaenge mind. 1.65m (Kurzstand) oder 1.95m (Mittellangstand).' },
+  { species: 'Rinder', production_system: 'TSchV-Minimum', requirement: 'Tageslicht und Beleuchtung', min_space_m2: null, details: 'TSchV Art. 33: Fensterflaeche mind. 1/20 der Bodenflaeche. Kuenstliches Licht mind. 15 Lux im Tierbereich waehrend 8h.' },
+  { species: 'Rinder', production_system: 'RAUS', requirement: 'Auslauf Sommer (1.5.-31.10.)', min_space_m2: null, details: 'RAUS-Programm DZV: Mind. 26 Tage/Monat Weidegang waehrend Vegetationsperiode. Weidefläche angepasst an Bestandesgroesse.' },
+  { species: 'Rinder', production_system: 'RAUS', requirement: 'Auslauf Winter (1.11.-30.4.)', min_space_m2: null, details: 'RAUS-Programm DZV: Mind. 13 Tage/Monat Auslauf im Freien (Laufhof oder Weide). Laufhofflaeche mind. 2.5 m2/GVE.' },
+  { species: 'Rinder', production_system: 'RAUS', requirement: 'Beitrag RAUS Rinder', min_space_m2: null, details: 'DZV: RAUS-Beitrag 190 CHF/GVE (Milchkuehe, Mutterkühe, Aufzuchtrinder). Kumulation mit BTS moeglich.' },
+  { species: 'Rinder', production_system: 'BTS', requirement: 'Laufstall mit Liegebereich', min_space_m2: null, details: 'BTS-Programm DZV: Laufstall obligatorisch (keine Anbindehaltung). Liegebereich mit Einstreu. Fressplatzbreite mind. 0.70m/Kuh.' },
+  { species: 'Rinder', production_system: 'BTS', requirement: 'Beitrag BTS Rinder', min_space_m2: null, details: 'DZV: BTS-Beitrag 90 CHF/GVE (Rindvieh). Kumulation mit RAUS: Total 280 CHF/GVE.' },
+
+  // --- Schweine ---
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Bucht Mastschwein >60kg', min_space_m2: 0.9, details: 'TSchV Anhang 1, Tab. 3: Mindestflaeche pro Mastschwein ueber 60 kg Lebendgewicht. Davon max. 50% Spaltenbodenanteil.' },
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Bucht Mastschwein 25-60kg', min_space_m2: 0.6, details: 'TSchV Anhang 1: Mastschwein 25-60 kg Lebendgewicht.' },
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Bucht Zuchtsau saeugend', min_space_m2: 5.5, details: 'TSchV Anhang 1: Abferkelbucht mind. 5.5 m2 inkl. Ferkelnest. Kastenstand nur waehrend Abferkeln und erste Tage (max. Dauer diskutiert).' },
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Gruppenhaltung traechtige Sauen', min_space_m2: 2.5, details: 'TSchV Art. 46: Traechtige Sauen muessen in Gruppen gehalten werden (Ausnahme: 10 Tage vor Abferkeln). Mind. 2.5 m2/Sau.' },
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Beschaeftigungsmaterial', min_space_m2: null, details: 'TSchV Art. 44: Schweine muessen jederzeit Zugang zu Raufutter (Stroh, Heu) oder anderem Beschaeftigungsmaterial haben. Ketten allein genuegen nicht.' },
+  { species: 'Schweine', production_system: 'TSchV-Minimum', requirement: 'Verbot Vollspaltenboeden', min_space_m2: null, details: 'TSchV Art. 45: Buchtenboden max. 50% perforiert. Liegebereich muss eingestreut oder mit Komfortauflage versehen sein.' },
+  { species: 'Schweine', production_system: 'RAUS', requirement: 'Auslauf Schweine', min_space_m2: null, details: 'RAUS-Programm: Alle Schweine muessen taeglich Zugang zu Aussenklima-Bereich haben. Auslaufflaeche: Mastschwein 0.45 m2, Zuchtsau 1.3 m2.' },
+  { species: 'Schweine', production_system: 'RAUS', requirement: 'Beitrag RAUS Schweine', min_space_m2: null, details: 'DZV: RAUS-Beitrag 155 CHF/GVE (Schweine). Zuechter und Maester separat anspruchsberechtigt.' },
+  { species: 'Schweine', production_system: 'BTS', requirement: 'Mehrflaeche und Einstreu', min_space_m2: null, details: 'BTS-Programm: Mind. 20% mehr Flaeche als TSchV-Minimum. Liegebereich vollstaendig eingestreut. Mastschwein >60kg: mind. 1.1 m2 total.' },
+  { species: 'Schweine', production_system: 'BTS', requirement: 'Beitrag BTS Schweine', min_space_m2: null, details: 'DZV: BTS-Beitrag 155 CHF/GVE (Schweine). Kumulation mit RAUS: Total 310 CHF/GVE.' },
+
+  // --- Gefluegel ---
+  { species: 'Gefluegel', production_system: 'TSchV-Minimum', requirement: 'Besatzdichte Legehennen', min_space_m2: null, details: 'TSchV Anhang 1, Tab. 9: Max. 7 Legehennen pro m2 nutzbare Flaeche (Bodenhaltung). Kaefighaltung verboten seit 1992 in der Schweiz.' },
+  { species: 'Gefluegel', production_system: 'TSchV-Minimum', requirement: 'Besatzdichte Mastpoulets', min_space_m2: null, details: 'TSchV Anhang 1: Max. 30 kg Lebendgewicht pro m2 (Bodenhaltung). Ca. 13-15 Tiere/m2 bei Schlachtgewicht.' },
+  { species: 'Gefluegel', production_system: 'TSchV-Minimum', requirement: 'Einrichtung Legehennen', min_space_m2: null, details: 'TSchV Art. 59-62: Sitzstangen (mind. 14 cm/Tier), Legenester (1 Nest pro 5 Hennen), Einstreu im Scharrbereich (mind. 1/3 der Flaeche), erhoehte Sitzgelegenheiten.' },
+  { species: 'Gefluegel', production_system: 'TSchV-Minimum', requirement: 'Licht Gefluegel', min_space_m2: null, details: 'TSchV Art. 58: Tageslicht obligatorisch (Fensterflaeche mind. 1/20 der Bodenflaeche). Dunkelphase mind. 8h.' },
+  { species: 'Gefluegel', production_system: 'RAUS', requirement: 'Weide Legehennen', min_space_m2: null, details: 'RAUS-Programm: Taeglich Zugang zur Weide bei guenstiger Witterung. Weideflaeche mind. 2.5 m2/Tier. Rotation empfohlen (Parasitenmanagement).' },
+  { species: 'Gefluegel', production_system: 'RAUS', requirement: 'Beitrag RAUS Gefluegel', min_space_m2: null, details: 'DZV: RAUS-Beitrag 280 CHF/GVE fuer Legehennen (1 GVE = ca. 111 Hennen). Mastgefluegel: 280 CHF/GVE.' },
+  { species: 'Gefluegel', production_system: 'BTS', requirement: 'Voliere/Bodenhaltung', min_space_m2: null, details: 'BTS-Programm Gefluegel: Wintergarten (ueberdachter, geschuetzter Aussenklimabereich) obligatorisch. Mind. 1/3 der Stallflaeche als Scharrbereich.' },
+
+  // --- Schafe ---
+  { species: 'Schafe', production_system: 'TSchV-Minimum', requirement: 'Flaeche Mutterschaf mit Lamm', min_space_m2: 1.5, details: 'TSchV Anhang 1, Tab. 5: Mindestflaeche Mutterschaf mit Lamm. Ohne Lamm: 1.0 m2. Haltung im Freien ganzjaehrig erlaubt mit Witterungsschutz.' },
+  { species: 'Schafe', production_system: 'TSchV-Minimum', requirement: 'Flaeche Mastlamm', min_space_m2: 0.5, details: 'TSchV Anhang 1: Mastlamm bis 40 kg. Ueber 40 kg: 0.7 m2.' },
+  { species: 'Schafe', production_system: 'TSchV-Minimum', requirement: 'Witterungsschutz', min_space_m2: null, details: 'TSchV Art. 36: Bei ganzjaehriger Weidehaltung ist ein natuerlicher oder kuenstlicher Witterungsschutz (Unterstand, Hecken, Wald) obligatorisch.' },
+  { species: 'Schafe', production_system: 'RAUS', requirement: 'Auslauf Schafe', min_space_m2: null, details: 'RAUS-Programm: Ganzjaehriger Weidegang oder Laufhof. Sommer: taeglicher Weidegang. Winter: mind. 13 Tage/Monat Auslauf.' },
+  { species: 'Schafe', production_system: 'RAUS', requirement: 'Beitrag RAUS Schafe', min_space_m2: null, details: 'DZV: RAUS-Beitrag 190 CHF/GVE (Schafe). 1 GVE = ca. 7 Mutterschafe.' },
+
+  // --- Ziegen ---
+  { species: 'Ziegen', production_system: 'TSchV-Minimum', requirement: 'Flaeche Milchziege', min_space_m2: 1.5, details: 'TSchV Anhang 1, Tab. 6: Mindestflaeche pro ausgewachsene Ziege. Erhoehte Liegeflaechenelemente obligatorisch (Ziegen klettern naturgemaess).' },
+  { species: 'Ziegen', production_system: 'TSchV-Minimum', requirement: 'Flaeche Zicklein', min_space_m2: 0.5, details: 'TSchV Anhang 1: Zicklein bis 15 kg Lebendgewicht.' },
+  { species: 'Ziegen', production_system: 'TSchV-Minimum', requirement: 'Erhoehte Liegeflaechen', min_space_m2: null, details: 'TSchV Art. 56: Ziegen muessen erhoehte Liegeflaechen (Plattformen, Regale) zur Verfuegung haben. Mindestens fuer 50% der Herde gleichzeitig.' },
+  { species: 'Ziegen', production_system: 'RAUS', requirement: 'Auslauf Ziegen', min_space_m2: null, details: 'RAUS-Programm: Analog Schafe — ganzjaehriger Zugang zu Freigelände. Ziegen benoetigen zusaetzlich Klettermoeglich­keiten im Auslauf.' },
+  { species: 'Ziegen', production_system: 'RAUS', requirement: 'Beitrag RAUS Ziegen', min_space_m2: null, details: 'DZV: RAUS-Beitrag 190 CHF/GVE (Ziegen). 1 GVE = ca. 7 Milchziegen.' },
+
+  // --- Pferde ---
+  { species: 'Pferde', production_system: 'TSchV-Minimum', requirement: 'Boxengroesse Einzelhaltung', min_space_m2: null, details: 'TSchV Anhang 1, Tab. 7: Mindestflaeche = (2 x Wh)^2, wobei Wh = Widerristhoehe. Fuer Pferd mit Wh 1.60m: mind. 10.24 m2. Kuerzeste Seite mind. 1.5 x Wh.' },
+  { species: 'Pferde', production_system: 'TSchV-Minimum', requirement: 'Gruppenhaltung Pferde', min_space_m2: null, details: 'TSchV Anhang 1: Gruppenauslaufhaltung: mind. 3 x Wh^2 pro Pferd Liegebereich + Auslauf. Fuer Wh 1.60m: mind. 7.68 m2 Liegebereich/Pferd.' },
+  { species: 'Pferde', production_system: 'TSchV-Minimum', requirement: 'Bewegung Pferde', min_space_m2: null, details: 'TSchV Art. 59: Pferde und andere Equiden muessen taeglich Auslauf im Freien haben (Weide, Paddock). Anbindehaltung (Staenderhaltung) verboten.' },
+  { species: 'Pferde', production_system: 'TSchV-Minimum', requirement: 'Sozialkontakt', min_space_m2: null, details: 'TSchV Art. 59: Pferde muessen Sicht-, Hoer- und Geruchskontakt zu Artgenossen haben. Dauerhafte Einzelhaltung ohne Artgenossenkontakt verboten.' },
+  { species: 'Pferde', production_system: 'RAUS', requirement: 'Auslauf Pferde RAUS', min_space_m2: null, details: 'RAUS-Programm: Pferde muessen taeglich Auslauf im Freien haben. Ganzjaehrig: mind. 2h/Tag Weide oder Paddock. Weidesaison (Mai-Okt): ganztaegiger Zugang empfohlen.' },
+  { species: 'Pferde', production_system: 'RAUS', requirement: 'Beitrag RAUS Pferde', min_space_m2: null, details: 'DZV: RAUS-Beitrag 190 CHF/GVE (Pferde/Equiden). 1 GVE = ca. 0.7 Pferde (abhaengig von Groesse/Alter).' },
 ];
 
+const welfareColumns = ['species', 'production_system', 'requirement', 'min_space_m2', 'details', 'language', 'jurisdiction'];
+batchInsert('welfare_standards', welfareColumns,
+  welfareStandards.map(w => [w.species, w.production_system, w.requirement, w.min_space_m2, w.details, 'DE', 'CH'])
+);
+
 // ---------------------------------------------------------------------------
-// 2. Soil Types — Swiss soil classification (10 types)
-//    Source: GRUD Anhang, Bodenkarte Schweiz
+// 2. Stocking Densities — TSchV Anhang 1 Platzbedarf
 // ---------------------------------------------------------------------------
 
-interface SoilType {
-  id: string;
-  name: string;
-  soil_group: number;
-  texture: string;
-  drainage_class: string;
-  ph_class: string;
+interface StockingDensity {
+  species: string;
+  age_class: string;
+  housing_type: string;
+  animals_per_m2: number | null;
+  regulatory_minimum: string;
+}
+
+const stockingDensities: StockingDensity[] = [
+  // Rinder
+  { species: 'Rinder', age_class: 'Milchkuh', housing_type: 'Laufstall', animals_per_m2: null, regulatory_minimum: '4.5 m2 Liegeflaeche/Kuh, Laufgang mind. 2.5m breit' },
+  { species: 'Rinder', age_class: 'Milchkuh', housing_type: 'Anbindestall', animals_per_m2: null, regulatory_minimum: 'Standlaenge 1.65m (Kurzstand) oder 1.95m (Mittellangstand), Breite 1.20m' },
+  { species: 'Rinder', age_class: 'Aufzuchtrind >400kg', housing_type: 'Laufstall', animals_per_m2: null, regulatory_minimum: '3.5 m2 Liegeflaeche/Tier' },
+  { species: 'Rinder', age_class: 'Aufzuchtrind 200-400kg', housing_type: 'Laufstall', animals_per_m2: null, regulatory_minimum: '2.5 m2 Liegeflaeche/Tier' },
+  { species: 'Rinder', age_class: 'Kalb <200kg', housing_type: 'Gruppenhaltung', animals_per_m2: null, regulatory_minimum: '1.5 m2/Kalb, Einzelhaltung max. 2 Wochen nach Geburt' },
+  { species: 'Rinder', age_class: 'Mastbulle >400kg', housing_type: 'Laufstall', animals_per_m2: null, regulatory_minimum: '3.5 m2/Tier, Spaltenbodenanteil max. 50%' },
+
+  // Schweine
+  { species: 'Schweine', age_class: 'Mastschwein >60kg', housing_type: 'Bucht', animals_per_m2: 1.11, regulatory_minimum: '0.9 m2/Tier (TSchV), BTS: 1.1 m2/Tier' },
+  { species: 'Schweine', age_class: 'Mastschwein 25-60kg', housing_type: 'Bucht', animals_per_m2: 1.67, regulatory_minimum: '0.6 m2/Tier' },
+  { species: 'Schweine', age_class: 'Zuchtsau trächtig', housing_type: 'Gruppenhaltung', animals_per_m2: 0.4, regulatory_minimum: '2.5 m2/Sau, Gruppenhaltung obligatorisch' },
+  { species: 'Schweine', age_class: 'Zuchtsau saeugend', housing_type: 'Abferkelbucht', animals_per_m2: null, regulatory_minimum: '5.5 m2 Abferkelbucht inkl. Ferkelnest' },
+  { species: 'Schweine', age_class: 'Absetzferkel', housing_type: 'Bucht', animals_per_m2: 2.86, regulatory_minimum: '0.35 m2/Tier (bis 25 kg)' },
+  { species: 'Schweine', age_class: 'Eber', housing_type: 'Einzelbucht', animals_per_m2: null, regulatory_minimum: '6.0 m2/Eber, Sicht- und Geruchskontakt zu anderen Schweinen' },
+
+  // Gefluegel
+  { species: 'Gefluegel', age_class: 'Legehenne', housing_type: 'Bodenhaltung', animals_per_m2: 7, regulatory_minimum: 'Max. 7 Hennen/m2 nutzbare Flaeche, Kaefighaltung seit 1992 verboten' },
+  { species: 'Gefluegel', age_class: 'Legehenne', housing_type: 'Freilandhaltung', animals_per_m2: 7, regulatory_minimum: 'Max. 7 Hennen/m2 Stallflaeche + mind. 2.5 m2 Weide/Tier' },
+  { species: 'Gefluegel', age_class: 'Mastpoulet', housing_type: 'Bodenhaltung', animals_per_m2: null, regulatory_minimum: 'Max. 30 kg/m2 Lebendgewicht (ca. 13-15 Tiere/m2)' },
+  { species: 'Gefluegel', age_class: 'Masttrute', housing_type: 'Bodenhaltung', animals_per_m2: null, regulatory_minimum: 'Max. 3 Truten/m2 (Hähne) bzw. 5 Truten/m2 (Hennen)' },
+
+  // Schafe
+  { species: 'Schafe', age_class: 'Mutterschaf mit Lamm', housing_type: 'Stall', animals_per_m2: 0.67, regulatory_minimum: '1.5 m2/Tier' },
+  { species: 'Schafe', age_class: 'Mutterschaf ohne Lamm', housing_type: 'Stall', animals_per_m2: 1.0, regulatory_minimum: '1.0 m2/Tier' },
+  { species: 'Schafe', age_class: 'Mastlamm <40kg', housing_type: 'Stall', animals_per_m2: 2.0, regulatory_minimum: '0.5 m2/Tier' },
+
+  // Ziegen
+  { species: 'Ziegen', age_class: 'Milchziege', housing_type: 'Stall', animals_per_m2: 0.67, regulatory_minimum: '1.5 m2/Tier, erhoehte Liegeflächen obligatorisch' },
+  { species: 'Ziegen', age_class: 'Zicklein <15kg', housing_type: 'Stall', animals_per_m2: 2.0, regulatory_minimum: '0.5 m2/Tier' },
+  { species: 'Ziegen', age_class: 'Ziegenbock', housing_type: 'Stall', animals_per_m2: null, regulatory_minimum: '2.0 m2/Tier, Sichtkontakt zu Herde' },
+
+  // Pferde
+  { species: 'Pferde', age_class: 'Pferd Wh 1.60m', housing_type: 'Einzelbox', animals_per_m2: null, regulatory_minimum: '10.24 m2 = (2 x 1.60)^2, kuerzeste Seite mind. 2.40m' },
+  { species: 'Pferde', age_class: 'Pferd Wh 1.60m', housing_type: 'Gruppenhaltung', animals_per_m2: null, regulatory_minimum: '7.68 m2 Liegebereich/Pferd + Auslauf' },
+  { species: 'Pferde', age_class: 'Pony Wh 1.30m', housing_type: 'Einzelbox', animals_per_m2: null, regulatory_minimum: '6.76 m2 = (2 x 1.30)^2' },
+];
+
+const stockingColumns = ['species', 'age_class', 'housing_type', 'animals_per_m2', 'regulatory_minimum', 'language', 'jurisdiction'];
+batchInsert('stocking_densities', stockingColumns,
+  stockingDensities.map(s => [s.species, s.age_class, s.housing_type, s.animals_per_m2, s.regulatory_minimum, 'DE', 'CH'])
+);
+
+// ---------------------------------------------------------------------------
+// 3. Housing Requirements — Detaillierte Stallbauanforderungen
+// ---------------------------------------------------------------------------
+
+interface HousingRequirement {
+  species: string;
+  age_class: string;
+  system: string;
+  space: string;
+  ventilation: string;
+  flooring: string;
+  temperature: string;
+}
+
+const housingRequirements: HousingRequirement[] = [
+  // Rinder
+  { species: 'Rinder', age_class: 'Milchkuh', system: 'Laufstall', space: '4.5 m2 Liegeflaeche, Fressplatzbreite 0.70m, Laufgang 2.5m', ventilation: 'Natuerliche Lueftung bevorzugt, max. 3 m/s Luftgeschwindigkeit im Tierbereich', flooring: 'Liegebereich: Gummimatte oder Stroh. Laufbereich: rutschfest, max. 50% perforiert. Spaltenweite max. 35mm (Kuehe)', temperature: 'Optimal 5-15°C, keine Minimalanforderung bei Aussenklimastaellen' },
+  { species: 'Rinder', age_class: 'Milchkuh', system: 'Anbindestall', space: 'Standlaenge 1.65m (Kurzstand) oder 1.95m (Mittellangstand), Breite 1.20m', ventilation: 'Wie Laufstall, plus Fensterflaeche 1/20 Bodenflaeche', flooring: 'Standflaeche trittfest, Liegebereich eingestreut oder Gummimatte, Hinterer Gitterrost max. 35mm Spalten', temperature: 'Wie Laufstall' },
+  { species: 'Rinder', age_class: 'Milchkuh', system: 'BTS', space: 'Laufstall obligatorisch. Fressplatzbreite mind. 0.70m. Liegebereich mit Einstreu oder Tiefstreu.', ventilation: 'Wie Laufstall', flooring: 'Liegebereich vollstaendig eingestreut (Stroh, Spaene). Kein Vollspaltenboden im Liegebereich.', temperature: 'Wie Laufstall' },
+  { species: 'Rinder', age_class: 'Kalb', system: 'Gruppenhaltung', space: '1.5 m2/Kalb (<200kg), Einzeliglu max. 2 Wochen nach Geburt', ventilation: 'Gut belueftet, Zugluft vermeiden', flooring: 'Eingestreuter Liegebereich, rutschfester Boden', temperature: 'Kaelbernest: Infrarotwaerme empfohlen bei <5°C' },
+
+  // Schweine
+  { species: 'Schweine', age_class: 'Mastschwein', system: 'Bucht', space: '0.9 m2/Tier >60kg, Liegebereich mind. 0.6 m2', ventilation: 'Zwangslueftung oder natuerliche Lueftung, NH3 <20ppm, CO2 <3000ppm', flooring: 'Max. 50% Spaltenanteil (Betonroste), Liegebereich planbefestigt und eingestreut', temperature: 'Optimal 16-22°C, Ferkel: 28-32°C (Ferkelnest)' },
+  { species: 'Schweine', age_class: 'Mastschwein', system: 'BTS', space: '1.1 m2/Tier >60kg (+20% gegenueber TSchV), Liegebereich mind. 0.7 m2', ventilation: 'Wie Standardbucht', flooring: 'Liegebereich vollstaendig eingestreut, planbefestigt. Aktivitaetsbereich kann Teilspalten haben.', temperature: 'Wie Standardbucht' },
+  { species: 'Schweine', age_class: 'Zuchtsau', system: 'Abferkelbucht', space: '5.5 m2 Abferkelbucht, Ferkelnest mind. 0.7 m2', ventilation: 'Getrennte Klimazonen: Sau 16-20°C, Ferkel 28-32°C', flooring: 'Planbefestigt, Liegebereich Sau eingestreut, Ferkelnest beheizt', temperature: 'Sau: 16-20°C, Ferkelnest: 28-32°C (Fussbodenheizung oder Infrarot)' },
+
+  // Gefluegel
+  { species: 'Gefluegel', age_class: 'Legehenne', system: 'Bodenhaltung', space: 'Max. 7 Hennen/m2, mind. 1/3 Scharrbereich mit Einstreu, Sitzstangen 14cm/Tier', ventilation: 'Gute Lueftung, NH3 <20ppm, relative Luftfeuchtigkeit 60-80%', flooring: 'Mind. 1/3 eingestreuter Scharrbereich, Rest Gitterrost/Spaltenboden ueber Kotgrube', temperature: 'Optimal 18-22°C, max. 30°C (Hitzestress ab 27°C)' },
+  { species: 'Gefluegel', age_class: 'Legehenne', system: 'BTS', space: 'Wie Bodenhaltung, plus Wintergarten (ueberdachter Aussenklimabereich) obligatorisch', ventilation: 'Wintergarten: offene Seite, wind- und regengeschuetzt', flooring: 'Scharrbereich mind. 1/3, Wintergarten: Naturboden oder eingestreut', temperature: 'Stall: 18-22°C, Wintergarten: Aussentemperatur' },
+  { species: 'Gefluegel', age_class: 'Mastpoulet', system: 'Bodenhaltung', space: 'Max. 30 kg/m2, Einstreu ganzflaechig', ventilation: 'Wie Legehennen, besonders wichtig: CO2 und NH3 Kontrolle', flooring: 'Ganzflaechig eingestreut (Holzspaene, Stroh), 5-10cm Einstreutiefe', temperature: 'Kueken: 33°C Tag 1, Absenkung 3°C/Woche bis 20°C' },
+
+  // Schafe
+  { species: 'Schafe', age_class: 'Mutterschaf', system: 'Stall', space: '1.5 m2/Tier mit Lamm, 1.0 m2 ohne Lamm', ventilation: 'Natuerliche Lueftung, Schafe vertragen Kaelte gut aber keine Zugluft', flooring: 'Stroh-Tiefstreu bevorzugt, trittfester Boden', temperature: 'Keine Minimalanforderung, Lammungsbereich: >5°C empfohlen' },
+
+  // Ziegen
+  { species: 'Ziegen', age_class: 'Milchziege', system: 'Stall', space: '1.5 m2/Tier, erhoehte Liegeflächen fuer mind. 50% der Herde', ventilation: 'Ziegen empfindlich auf Feuchtigkeit — gute Belueftung essenziell', flooring: 'Trocken, eingestreut, erhoehte Plattformen aus Holz', temperature: 'Ziegen vertragen Kaelte gut bei trockenen Bedingungen' },
+
+  // Pferde
+  { species: 'Pferde', age_class: 'Pferd Wh 1.60m', system: 'Einzelbox', space: '10.24 m2, kuerzeste Seite 2.40m, Deckenhoehe mind. 1.5 x Wh (2.40m)', ventilation: 'Natuerliche Lueftung, gute Luftqualitaet kritisch (Staub, Ammoniak)', flooring: 'Gummimatte + Einstreu (Stroh oder Spaene), min. 10cm Einstreutiefe', temperature: 'Keine Heizung noetig, Zugluftfreiheit wichtiger als Waerme' },
+  { species: 'Pferde', age_class: 'Pferd Wh 1.60m', system: 'Gruppenhaltung', space: '7.68 m2 Liegebereich/Pferd + Auslauf, Fressplaetze mind. 1 pro Tier', ventilation: 'Offenstall/Aktivstall: natuerliche Lueftung', flooring: 'Liegebereich: Tiefstreu oder Strohmatratze. Auslauf: befestigt, draeniert.', temperature: 'Offenstall: Witterungsschutz, Windschutz an Liegebereich' },
+];
+
+const housingColumns = ['species', 'age_class', 'system', 'space', 'ventilation', 'flooring', 'temperature', 'language', 'jurisdiction'];
+batchInsert('housing_requirements', housingColumns,
+  housingRequirements.map(h => [h.species, h.age_class, h.system, h.space, h.ventilation, h.flooring, h.temperature, 'DE', 'CH'])
+);
+
+// ---------------------------------------------------------------------------
+// 4. Movement Rules — TVD, Transport, Soemmerung, Schlachtung
+// ---------------------------------------------------------------------------
+
+interface MovementRule {
+  species: string;
+  rule_type: string;
   description: string;
 }
 
-const soilTypes: SoilType[] = [
-  { id: 'leichter-sand', name: 'Leichter Sandboden', soil_group: 1, texture: 'sand', drainage_class: 'sehr durchlaessig', ph_class: 'B', description: 'Tiefgruendiger Sandboden, <10% Ton, geringe Wasserhaltefaehigkeit' },
-  { id: 'sandiger-lehm', name: 'Sandiger Lehmboden', soil_group: 2, texture: 'sandiger-lehm', drainage_class: 'gut durchlaessig', ph_class: 'C', description: '10-15% Ton, gute Bearbeitbarkeit, mittlere Wasserhaltefaehigkeit' },
-  { id: 'leichter-lehm', name: 'Leichter Lehmboden', soil_group: 3, texture: 'lehm', drainage_class: 'maessig durchlaessig', ph_class: 'C', description: '15-20% Ton, vielseitig nutzbar, gute Naehrstoffversorgung' },
-  { id: 'mittlerer-lehm', name: 'Mittlerer Lehmboden', soil_group: 4, texture: 'lehm', drainage_class: 'maessig durchlaessig', ph_class: 'C', description: '20-30% Ton, gute Ertragsfaehigkeit, typischer Ackerboden Mittelland' },
-  { id: 'schwerer-lehm', name: 'Schwerer Lehmboden', soil_group: 5, texture: 'toniger-lehm', drainage_class: 'schwer durchlaessig', ph_class: 'C', description: '30-40% Ton, hohe Naehrstoffspeicherung, schwere Bearbeitung' },
-  { id: 'tonboden', name: 'Tonboden', soil_group: 6, texture: 'ton', drainage_class: 'sehr schwer durchlaessig', ph_class: 'D', description: '>40% Ton, sehr hohe Naehrstoffspeicherung, Staunassegefahr' },
-  { id: 'humoser-lehm', name: 'Humoser Lehmboden', soil_group: 7, texture: 'humoser-lehm', drainage_class: 'maessig durchlaessig', ph_class: 'C', description: '4-8% Humus, hohe biologische Aktivitaet, gute Strukturstabilitaet' },
-  { id: 'moorig', name: 'Mooriger Boden', soil_group: 8, texture: 'torf', drainage_class: 'variabel', ph_class: 'A', description: '>15% organische Substanz, hohes N-Nachlieferungspotenzial, Sackungs­gefahr' },
-  { id: 'kalkboden', name: 'Kalkboden / Rendzina', soil_group: 9, texture: 'kalkig-lehm', drainage_class: 'gut durchlaessig', ph_class: 'E', description: 'Karbonatreicher Boden, pH >7.5, Jura/Voralpen typisch, P-Festlegung' },
-  { id: 'bergboden', name: 'Brauner Bergboden', soil_group: 10, texture: 'steiniger-lehm', drainage_class: 'gut durchlaessig', ph_class: 'B', description: 'Flachgruendig, steinig, Bergzone I-IV, tiefere Ertraege' },
+const movementRules: MovementRule[] = [
+  // TVD — Rinder
+  { species: 'Rinder', rule_type: 'TVD', description: 'Alle Rinder muessen innerhalb von 3 Arbeitstagen nach Geburt in der TVD registriert werden. Zwei Ohrmarken (links + rechts) mit UELN-Nummer. Begleitdokument bei jedem Standortwechsel obligatorisch.' },
+  { species: 'Rinder', rule_type: 'TVD', description: 'Meldepflicht: Geburt, Zugang, Abgang, Tod, Schlachtung — jeweils innert 3 Arbeitstagen via agate.ch oder Meldestelle. Sanktionen bei verspaeteter Meldung (Beitragsabzuege).' },
+  { species: 'Rinder', rule_type: 'TVD', description: 'Tierpass (Rinderpass): Begleitet jedes Rind bei Standortwechsel. Enthaelt UELN, Rasse, Geschlecht, Geburtsdatum, Mutter-ID, Herkunftsland.' },
+
+  // TVD — Schweine
+  { species: 'Schweine', rule_type: 'TVD', description: 'Schweine: Betriebsregistrierung obligatorisch. Ohrmarken bei Abgang vom Geburtsbetrieb. Bestandeskontrolle: Zu- und Abgaenge innert 3 Arbeitstagen melden.' },
+  { species: 'Schweine', rule_type: 'TVD', description: 'Schweinepass nicht erforderlich, aber Begleitdokument bei Transport zum Schlachthof obligatorisch (Herkunft, Behandlungen, Absetzfristen).' },
+
+  // TVD — Schafe/Ziegen
+  { species: 'Schafe', rule_type: 'TVD', description: 'Schafe: Zwei Ohrmarken (eine elektronisch) obligatorisch. Registrierung innert 30 Tagen nach Geburt (90 Tage bei Soemmerung). Begleitdokument bei Standortwechsel.' },
+  { species: 'Ziegen', rule_type: 'TVD', description: 'Ziegen: Gleiche Regelung wie Schafe — zwei Ohrmarken, elektronische Kennzeichnung, Meldepflicht innert 30 Tagen.' },
+
+  // TVD — Pferde
+  { species: 'Pferde', rule_type: 'TVD', description: 'Equiden: Equidenpass (UELN) obligatorisch. Mikrochip-Implantation. Registrierung bei der Tierverkehrsdatenbank (Identitas AG). Pass begleitet Tier lebenslang.' },
+
+  // Transport
+  { species: 'Rinder', rule_type: 'Transport', description: 'Maximale Transportdauer: 8 Stunden. Schlachttiere: max. 6 Stunden. Transportbewilligung fuer gewerblichen Transport erforderlich. Sachkundenachweis fuer Fahrer obligatorisch. Transportfaehigkeit: nur gesunde, nicht verletzte Tiere.' },
+  { species: 'Schweine', rule_type: 'Transport', description: 'Maximale Transportdauer: 8 Stunden (Schlachttiere: 6h). Ladedichte: max. 235 kg/m2 fuer Mastschweine. Rampenneigung max. 20°. Dusche/Befeuchtung ab 25°C Aussentemperatur.' },
+  { species: 'Gefluegel', rule_type: 'Transport', description: 'Kuecken: max. 4 Stunden Transport (72h nach Schlupf). Mastgefluegel: max. 8 Stunden. Transportkisten: Mindesthoehe 23cm (Masthühner), natuerliche Belueftung.' },
+  { species: 'Schafe', rule_type: 'Transport', description: 'Maximale Transportdauer: 8 Stunden. Schafe und Ziegen gemeinsam transportierbar. Genügend Platz zum Stehen und Liegen.' },
+  { species: 'Pferde', rule_type: 'Transport', description: 'Maximale Transportdauer: 8 Stunden. Einzeltransport oder Gruppe (vertraegliche Tiere). Pferde muessen angebunden oder in Einzelboxen stehen koennen. Transportbewilligung + Sachkunde.' },
+
+  // Soemmerung/Alpung
+  { species: 'Rinder', rule_type: 'Soemmerung', description: 'Soemmerung/Alpung: Alpzeit 56-120 Tage (je nach Hoehenzone und Kanton). Normalbesatz: 0.5-2.5 GVE/ha (abhaengig von Standort und Vegetationsperiode). Soemmerungsbeitrag: 400 CHF/NST (Normalstoss). Meldung an TVD bei Alpaufzug und -abzug.' },
+  { species: 'Rinder', rule_type: 'Soemmerung', description: 'Alpkaese-Produktion: Verarbeitung auf der Alp erlaubt (vereinfachte Hygieneauflagen). GVE-Berechnung: 1 Milchkuh = 1 GVE, 1 Aufzuchtrind (1-2j) = 0.6 GVE, 1 Kalb (<1j) = 0.3 GVE.' },
+  { species: 'Schafe', rule_type: 'Soemmerung', description: 'Schafe auf Alpen: 1 GVE = ca. 7 Mutterschafe. Herdenschutz (Wolf): Nachtpferch, Schutzhunde, Behirtung. Bund und Kantone finanzieren Herdenschutzmassnahmen.' },
+  { species: 'Ziegen', rule_type: 'Soemmerung', description: 'Ziegen auf Alpen: Haeufig zusammen mit Schafen. Gleiche GVE-Umrechnung. Ziegenkaeserei auf Alpen traditionell (v.a. Tessin, Buenden).' },
+
+  // Schlachtung
+  { species: 'Rinder', rule_type: 'Schlachtung', description: 'Betaeubungspflicht obligatorisch (Bolzenschuss oder Elektrobetaeubung). Schaechten (Schlachtung ohne Betaeubung) seit 1893 in der Bundesverfassung verboten (BV Art. 80). Fleischkontrolle durch amtlichen Tierarzt.' },
+  { species: 'Schweine', rule_type: 'Schlachtung', description: 'Betaeubung: CO2-Betaeubung (Standard Grossschlachthof) oder Elektrobetaeubung. Schaechten verboten. Transportfaehigkeitskontrolle vor Schlachtung. Schlachtgebuehr und Entsorgungskosten.' },
+  { species: 'Gefluegel', rule_type: 'Schlachtung', description: 'Betaeubung: Elektrisches Wasserbad oder CO2. Baeuerliche Hofschlachtung: max. wenige Tiere/Woche fuer Direktvermarktung (kantonal geregelt). Betaeubungspflicht gilt auch auf dem Hof.' },
+  { species: 'Schafe', rule_type: 'Schlachtung', description: 'Betaeubung: Bolzenschuss oder Elektrobetaeubung. Hofschlachtung fuer Eigengebrauch erlaubt (Meldepflicht, Fleischkontrolle bei Direktvermarktung). Schaechten verboten.' },
 ];
 
-// ---------------------------------------------------------------------------
-// 3. Nutrient Recommendations — GRUD 2017
-//    N based on Stickstoffbedarfswerte, P/K on GRUD Entzugsduengung
-// ---------------------------------------------------------------------------
-
-interface NutrientRec {
-  crop_id: string;
-  soil_group: number;
-  altitude_zone: string;
-  previous_crop_group: string | null;
-  n_rec_kg_ha: number;
-  p_rec_kg_ha: number;
-  k_rec_kg_ha: number;
-  mg_rec_kg_ha: number;
-  notes: string;
-  grud_section: string;
-}
-
-const nutrientRecs: NutrientRec[] = [
-  // Winterweizen — Talzone, different soil groups
-  { crop_id: 'winterweizen', soil_group: 1, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 140, p_rec_kg_ha: 52, k_rec_kg_ha: 65, mg_rec_kg_ha: 15, notes: 'N-Bedarfswert GRUD: 140 kg N/ha bei 6.5 t/ha Ertrag. P/K Entzugsduengung bei Versorgungsklasse C.', grud_section: 'GRUD Kap. 6/7' },
-  { crop_id: 'winterweizen', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 140, p_rec_kg_ha: 48, k_rec_kg_ha: 55, mg_rec_kg_ha: 12, notes: 'Mittlerer Lehm: leicht reduzierter K-Bedarf durch hoehere Bodenvorraete.', grud_section: 'GRUD Kap. 6/7' },
-  { crop_id: 'winterweizen', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: 'koernerleguminosen', n_rec_kg_ha: 120, p_rec_kg_ha: 48, k_rec_kg_ha: 55, mg_rec_kg_ha: 12, notes: 'Vorfrucht Leguminose: N-Reduktion um 20 kg/ha (Suisse-Bilanz Korrekturfaktor).', grud_section: 'GRUD Kap. 6/7' },
-  { crop_id: 'winterweizen', soil_group: 4, altitude_zone: 'huegelzone', previous_crop_group: null, n_rec_kg_ha: 120, p_rec_kg_ha: 42, k_rec_kg_ha: 48, mg_rec_kg_ha: 10, notes: 'Huegelzone: reduzierter Ertrag (~5.5 t/ha) und entsprechend geringerer Naehrstoffbedarf.', grud_section: 'GRUD Kap. 6/7' },
-
-  // Winterraps
-  { crop_id: 'winterraps', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 150, p_rec_kg_ha: 56, k_rec_kg_ha: 70, mg_rec_kg_ha: 15, notes: 'Hoher N-Bedarf, Herbst-N beachten (40-60 kg N vor Winter fuer Rosette). S-Duengung 20-30 kg S/ha empfohlen.', grud_section: 'GRUD Kap. 6' },
-
-  // Koernermais
-  { crop_id: 'koernermais', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 130, p_rec_kg_ha: 65, k_rec_kg_ha: 60, mg_rec_kg_ha: 15, notes: 'N-Bedarfswert bei 10 t/ha. Band-/Unterfussduengung reduziert P-Bedarf. Mais hat hohes K-Aufnahmevermoegen.', grud_section: 'GRUD Kap. 6/7' },
-
-  // Silomais
-  { crop_id: 'silomais', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 120, p_rec_kg_ha: 68, k_rec_kg_ha: 200, mg_rec_kg_ha: 15, notes: 'Hoher K-Entzug durch Ganzpflanzenernte! Hofduenger bevorzugt einsetzen.', grud_section: 'GRUD Kap. 6/7' },
-
-  // Kartoffeln
-  { crop_id: 'kartoffeln', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 140, p_rec_kg_ha: 55, k_rec_kg_ha: 200, mg_rec_kg_ha: 20, notes: 'Kartoffeln: hoher K-Bedarf. Chloridempfindlich — Kalidüngung im Herbst (Patentkali) oder chloridfreie Formen.', grud_section: 'GRUD Kap. 6/7' },
-
-  // Zuckerrueben
-  { crop_id: 'zuckerrueben', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 120, p_rec_kg_ha: 55, k_rec_kg_ha: 250, mg_rec_kg_ha: 25, notes: 'Niedrigerer N, um Zuckergehalt zu sichern. Sehr hoher K-Bedarf. Na-Duengung (50 kg/ha) foerdert Ertrag.', grud_section: 'GRUD Kap. 6/7' },
-
-  // Kunstwiese
-  { crop_id: 'kunstwiese-3j', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 170, p_rec_kg_ha: 72, k_rec_kg_ha: 260, mg_rec_kg_ha: 20, notes: 'Bei >30% Kleeanteil: N-Reduktion um 30-50 kg/ha. Staffelung der N-Gaben ueber 4 Schnitte.', grud_section: 'GRUD Kap. 8' },
-
-  // Naturwiese intensiv
-  { crop_id: 'naturwiese-intensiv', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 130, p_rec_kg_ha: 60, k_rec_kg_ha: 220, mg_rec_kg_ha: 15, notes: 'Talzone intensiv Dauergruenland. P/K-Entzugsduengung. Hofduenger deckt Grossteil des Bedarfs.', grud_section: 'GRUD Kap. 8' },
-
-  // Naturwiese mittelintensiv
-  { crop_id: 'naturwiese-mittelintensiv', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 80, p_rec_kg_ha: 45, k_rec_kg_ha: 165, mg_rec_kg_ha: 10, notes: 'Wenig intensiv genutztes Gruenland. Max 3 Schnitte. Hofduenger in der Regel ausreichend.', grud_section: 'GRUD Kap. 8' },
-
-  // Dinkel
-  { crop_id: 'dinkel', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 110, p_rec_kg_ha: 41, k_rec_kg_ha: 45, mg_rec_kg_ha: 10, notes: 'Dinkel (Urdinkel/UrDinkel): geringerer N-Bedarf als Weizen. Extenso-tauglich (ohne Fungizide/Insektizide).', grud_section: 'GRUD Kap. 6' },
-
-  // Eiweisserbsen
-  { crop_id: 'koernereiweisserbsen', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 0, p_rec_kg_ha: 35, k_rec_kg_ha: 55, mg_rec_kg_ha: 10, notes: 'Leguminose: kein N-Duenger noetig (biologische N-Fixierung). Positive Vorfruchtwirkung 20-40 kg N/ha.', grud_section: 'GRUD Kap. 6' },
-
-  // Sojabohnen
-  { crop_id: 'sojabohnen', soil_group: 4, altitude_zone: 'talzone', previous_crop_group: null, n_rec_kg_ha: 0, p_rec_kg_ha: 42, k_rec_kg_ha: 55, mg_rec_kg_ha: 10, notes: 'Leguminose: Impfung mit Bradyrhizobium japonicum bei Erstanbau. Kein N-Duenger.', grud_section: 'GRUD Kap. 6' },
-];
+const movementColumns = ['species', 'rule_type', 'description', 'language', 'jurisdiction'];
+batchInsert('movement_rules', movementColumns,
+  movementRules.map(m => [m.species, m.rule_type, m.description, 'DE', 'CH'])
+);
 
 // ---------------------------------------------------------------------------
-// 4. Manure Values — GRUD Kapitel 10 (Hofduenger Naehrstoffgehalte)
+// 5. Breeds — Schweizer Rassen
 // ---------------------------------------------------------------------------
 
-interface ManureValue {
-  animal_category: string;
-  housing_system: string;
-  n_per_gve: number;
-  p2o5_per_gve: number;
-  k2o_per_gve: number;
-  nh3_loss_pct: number;
+interface Breed {
+  species: string;
+  name: string;
+  purpose: string;
   notes: string;
 }
 
-const manureValues: ManureValue[] = [
-  { animal_category: 'milchkuh', housing_system: 'laufstall', n_per_gve: 105, p2o5_per_gve: 35, k2o_per_gve: 115, nh3_loss_pct: 15, notes: 'Milchkuh 6500 kg/Jahr. Guelle + Mist. Laufstall reduziert NH3 vs. Anbindestall.' },
-  { animal_category: 'milchkuh', housing_system: 'anbindestall', n_per_gve: 105, p2o5_per_gve: 35, k2o_per_gve: 115, nh3_loss_pct: 18, notes: 'Anbindestall: hoehere NH3-Verluste durch groessere Guelleoberfläche.' },
-  { animal_category: 'mutterkuh', housing_system: 'tiefstreu', n_per_gve: 95, p2o5_per_gve: 32, k2o_per_gve: 100, nh3_loss_pct: 12, notes: 'Mutterkuhhaltung Tiefstreu. Weniger Guelle, mehr Mist.' },
-  { animal_category: 'aufzuchtrind', housing_system: 'laufstall', n_per_gve: 85, p2o5_per_gve: 28, k2o_per_gve: 90, nh3_loss_pct: 14, notes: 'Aufzucht 1-2 Jahre. Pro Tier ca. 0.4-0.6 GVE.' },
-  { animal_category: 'mastschwein', housing_system: 'spalten', n_per_gve: 112, p2o5_per_gve: 48, k2o_per_gve: 60, nh3_loss_pct: 20, notes: 'Mastschwein 25-110 kg. Pro Tier ca. 0.17 GVE. N-reduzierte Fuetterung senkt N-Anfall um 10-15%.' },
-  { animal_category: 'zuchtsau', housing_system: 'spalten', n_per_gve: 120, p2o5_per_gve: 55, k2o_per_gve: 65, nh3_loss_pct: 22, notes: 'Zuchtsau mit Ferkeln bis 8 kg. Pro Tier ca. 0.45 GVE.' },
-  { animal_category: 'legehenne', housing_system: 'bodenhaltung', n_per_gve: 145, p2o5_per_gve: 75, k2o_per_gve: 65, nh3_loss_pct: 25, notes: 'Legehenne. Pro Tier ca. 0.014 GVE. Huehnermist ist P-reich — Suisse-Bilanz beachten!' },
-  { animal_category: 'mastpoulet', housing_system: 'bodenhaltung', n_per_gve: 150, p2o5_per_gve: 62, k2o_per_gve: 70, nh3_loss_pct: 28, notes: 'Mastpoulet. Pro Tier ca. 0.005 GVE. Trockenheit Einstreu: hohe NH3-Verluste.' },
-  { animal_category: 'pferd', housing_system: 'box', n_per_gve: 80, p2o5_per_gve: 25, k2o_per_gve: 90, nh3_loss_pct: 15, notes: 'Pferd. Pro Tier ca. 1.0 GVE. Pferdemist: geringer N, hoher K, gut fuer Kompost.' },
-  { animal_category: 'schaf', housing_system: 'laufstall', n_per_gve: 85, p2o5_per_gve: 25, k2o_per_gve: 75, nh3_loss_pct: 12, notes: 'Mutterschaf mit Lamm. Pro Tier ca. 0.17 GVE. Schafmist gut strukturiert.' },
-  { animal_category: 'ziege', housing_system: 'laufstall', n_per_gve: 90, p2o5_per_gve: 28, k2o_per_gve: 80, nh3_loss_pct: 12, notes: 'Milchziege. Pro Tier ca. 0.17 GVE.' },
+const breeds: Breed[] = [
+  // Rinder
+  { species: 'Rinder', name: 'Braunvieh (Brown Swiss)', purpose: 'Zweinutzung (Milch + Fleisch)', notes: 'Aelteste Rinderrasse der Welt. Ursprung Innerschweiz. Brown Swiss (US-Typ) = Milchbetont, Original Braunvieh = Zweinutzung. Braunvieh Schweiz (Zuchtorganisation). Ca. 15% des CH-Milchkuhbestands.' },
+  { species: 'Rinder', name: 'Original Braunvieh (OB)', purpose: 'Zweinutzung, Alptauglichkeit', notes: 'Traditionelle Schweizer Rasse, kleiner und robuster als Brown Swiss. Besonders geeignet fuer Berggebiet und Alpung. Schutzbedarf wegen kleinem Bestand. ProSpecieRara-Rasse.' },
+  { species: 'Rinder', name: 'Simmental / Fleckvieh', purpose: 'Zweinutzung (Milch + Fleisch)', notes: 'Ursprung Simmental (BE). Weltweit verbreitet. Schweizer Fleckvieh: Milchbetonter Typ. Swissherdbook (Zuchtorganisation). Groesste Rasse in CH nach Holstein.' },
+  { species: 'Rinder', name: 'Holstein', purpose: 'Milch', notes: 'Hoechste Milchleistung aller Rassen (8000-10000 kg/Laktation). Zunehmender Anteil in Talzone-Milchbetrieben. Swissherdbook. Ca. 30% des CH-Milchkuhbestands.' },
+  { species: 'Rinder', name: 'Eringer (Herens)', purpose: 'Fleisch, Tradition (Kuhkaempfe)', notes: 'Ursprung Wallis. Kleine, robuste Kampfrasse. "Combats de reines" (Kuhkaempfe) — kulturelle Tradition im Wallis. Fleischproduktion, Alpsoemmerung. Geschuetzte Rasse.' },
+  { species: 'Rinder', name: 'Grauvieh', purpose: 'Zweinutzung, Alptauglichkeit', notes: 'Ursprung Graubuenden. Kleine, genuegsame Rasse fuer extreme Berglagen. ProSpecieRara-Rasse. Bestand ca. 1500 Tiere. Kaeseproduktion (Alpkaese).' },
+  { species: 'Rinder', name: 'Hinterwaelder', purpose: 'Zweinutzung, extensiv', notes: 'Kleine Rasse, urspruenglich Schwarzwald, auch in CH Berggebiet. Sehr leichtfuttrig und gelaendegaengig. ProSpecieRara.' },
+  { species: 'Rinder', name: 'Evolener', purpose: 'Zweinutzung, Alptauglichkeit', notes: 'Seltene Walliser Rasse, verwandt mit Eringer. Sehr kleine Population. ProSpecieRara-Schutzprogramm.' },
+
+  // Schweine
+  { species: 'Schweine', name: 'Schweizer Edelschwein (Grosses Weisses)', purpose: 'Mutterrasse, Milchleistung', notes: 'Hauptrasse in CH-Schweinezucht. Suisseporcs (Zuchtorganisation). Mutterlinie in Kreuzungsprogrammen. Gute Wurfgroesse und Milchleistung.' },
+  { species: 'Schweine', name: 'Schweizer Landrasse', purpose: 'Mutterrasse', notes: 'Zweithaeufigte Rasse. Kreuzung mit Edelschwein = F1-Sauen fuer Mastferkelproduktion. Robust, gute Muttereigenschaften.' },
+  { species: 'Schweine', name: 'Duroc', purpose: 'Vaterrasse (Fleischqualitaet)', notes: 'Endstufeneber fuer Fleischqualitaet (intramuskulaeres Fett, Zartheit). Premo-Programm (Suisseporcs).' },
+  { species: 'Schweine', name: 'Pietrain', purpose: 'Vaterrasse (Fleischansatz)', notes: 'Endstufeneber fuer Fleischansatz und Magerkeit. Stresssensibilitaet beachten (MHS-Gen). In CH seltener als Duroc.' },
+
+  // Schafe
+  { species: 'Schafe', name: 'Weisses Alpenschaf', purpose: 'Milch, Fleisch, Wolle', notes: 'Haeufigste Schafrasse in der Schweiz. Robust, alptauglich. Swisssheep (Zuchtorganisation).' },
+  { species: 'Schafe', name: 'Schwarznasenschaf (Walliser)', purpose: 'Fleisch, Landschaftspflege, Wolle', notes: 'Ikonische Walliser Rasse mit schwarzer Nase und Spiralhoernern. UNESCO Immaterielles Kulturerbe (Kandidat). Touristenattraktion, robuste Bergrasse.' },
+  { species: 'Schafe', name: 'Engadinerschaf', purpose: 'Fleisch, Landschaftspflege', notes: 'Seltene Buendner Rasse. ProSpecieRara. Alptauglich, genuegsam.' },
+  { species: 'Schafe', name: 'Braunkoepfiges Fleischschaf', purpose: 'Fleisch (Mastlamm)', notes: 'Fruehreife Fleischschafrasse, besonders geeignet fuer Mast. Schweizer Zuchtlinie.' },
+  { species: 'Schafe', name: 'Spiegelschaf', purpose: 'Fleisch, Milch', notes: 'Schweizer Rasse, ProSpecieRara. Helle Flecken um die Augen (Spiegel). Bestand ca. 1200 Tiere.' },
+
+  // Ziegen
+  { species: 'Ziegen', name: 'Saaneziege (Saanenziege)', purpose: 'Milch', notes: 'Weltweit verbreitete Schweizer Milchziegenrasse. Ursprung Saanen (BE). Weiss, hornlos. Hoechste Milchleistung (800-1000 kg/Laktation). Schweizerischer Ziegenzuchtverband (SZZV).' },
+  { species: 'Ziegen', name: 'Toggenburger Ziege', purpose: 'Milch', notes: 'Ursprung Toggenburg (SG). Braun mit weissen Streifen im Gesicht. Robuste Milchziege, alptauglich.' },
+  { species: 'Ziegen', name: 'Appenzellerziege', purpose: 'Milch, Landschaftspflege', notes: 'Weisse Ziegenrasse aus dem Appenzellerland. Mittelgross, robust. ProSpecieRara.' },
+  { species: 'Ziegen', name: 'Buendner Strahlenziege', purpose: 'Milch, Fleisch', notes: 'Schwarze Ziege mit weissen Streifen (Strahlen) im Gesicht. Graubuenden. ProSpecieRara-Rasse. Traditionelle Alpziegenrasse.' },
+  { species: 'Ziegen', name: 'Walliser Schwarzhalsziege', purpose: 'Fleisch, Landschaftspflege', notes: 'Zweifarbig: vordere Haelfte schwarz, hintere weiss. Robuste Bergrasse. ProSpecieRara. Beliebtes Motiv, touristisch wertvoll.' },
+  { species: 'Ziegen', name: 'Stiefelgeiss', purpose: 'Milch, Fleisch', notes: 'Seltene Schweizer Rasse, weiss mit braunen "Stiefeln" an den Beinen. ProSpecieRara. Bestand ca. 800 Tiere.' },
+
+  // Pferde
+  { species: 'Pferde', name: 'Freiberger (Franches-Montagnes)', purpose: 'Arbeit, Freizeit, Militaer', notes: 'Einzige Schweizer Pferderasse. Ursprung Jura. Vielseitiger Kaltblut-/Warmbluttyp. Vom Bund gefoerdert (Schweizerisches Nationalgestuet Avenches). Bestand ca. 25000.' },
+  { species: 'Pferde', name: 'Warmblut CH', purpose: 'Sport (Springen, Dressur)', notes: 'Schweizer Warmblut (ZVCH). Sport- und Freizeitpferd. Zucht basiert auf internationalen Blutlinien + CH-Stutenstamm.' },
 ];
 
+const breedColumns = ['species', 'name', 'purpose', 'notes', 'language', 'jurisdiction'];
+batchInsert('breeds', breedColumns,
+  breeds.map(b => [b.species, b.name, b.purpose, b.notes, 'DE', 'CH'])
+);
+
 // ---------------------------------------------------------------------------
-// 5. Commodity Prices — Swiss producer prices (SBV/BLW data)
+// 6. Feed Requirements — Fuetterung pro Tierart und Produktionsstadium
 // ---------------------------------------------------------------------------
 
-interface CommodityPrice {
-  crop_id: string;
-  market: string;
-  price_per_tonne: number;
-  price_source: string;
-  published_date: string;
-  source: string;
+interface FeedRequirement {
+  species: string;
+  age_class: string;
+  production_stage: string;
+  feed_type: string;
+  quantity_kg_day: number | null;
+  energy_mj: number | null;
+  protein_g: number | null;
+  notes: string;
 }
 
-const prices: CommodityPrice[] = [
-  { crop_id: 'winterweizen', market: 'produzentenpreis', price_per_tonne: 520, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Brotweizen Top' },
-  { crop_id: 'sommerweizen', market: 'produzentenpreis', price_per_tonne: 510, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Brotweizen I' },
-  { crop_id: 'wintergerste', market: 'produzentenpreis', price_per_tonne: 380, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Futtergerste' },
-  { crop_id: 'sommergerste', market: 'produzentenpreis', price_per_tonne: 440, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Braugerste' },
-  { crop_id: 'winterraps', market: 'produzentenpreis', price_per_tonne: 800, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise HOLL-Raps' },
-  { crop_id: 'sonnenblumen', market: 'produzentenpreis', price_per_tonne: 760, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise HO-Sonnenblumen' },
-  { crop_id: 'koernermais', market: 'produzentenpreis', price_per_tonne: 390, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Futtermais' },
-  { crop_id: 'kartoffeln', market: 'produzentenpreis', price_per_tonne: 320, price_source: 'swisspatat', published_date: now, source: 'swisspatat Richtpreise Speisekartoffeln fest' },
-  { crop_id: 'zuckerrueben', market: 'produzentenpreis', price_per_tonne: 52, price_source: 'Schweizer Zucker AG', published_date: now, source: 'Schweizer Zucker AG Ruebenpreis (inkl. Fruehrodungszuschlag)' },
-  { crop_id: 'dinkel', market: 'produzentenpreis', price_per_tonne: 620, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise UrDinkel' },
-  { crop_id: 'koernereiweisserbsen', market: 'produzentenpreis', price_per_tonne: 530, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Futtereiweisserbsen' },
-  { crop_id: 'sojabohnen', market: 'produzentenpreis', price_per_tonne: 850, price_source: 'SBV/swiss granum', published_date: now, source: 'swiss granum Richtpreise Speisesoja' },
+const feedRequirements: FeedRequirement[] = [
+  // Rinder — Milchkuh
+  { species: 'Rinder', age_class: 'Milchkuh', production_stage: 'Laktation', feed_type: 'Grundfutter (Heu, Grassilage, Maissilage)', quantity_kg_day: null, energy_mj: 110, protein_g: 2800, notes: 'NEL-Bedarf: ca. 110 MJ NEL/Tag bei 25 kg Milch/Tag. Grundfutter bildet Basis (60-80% der Ration). Kraftfutter max. 40% Trockenmasse. GMF-Programm (DZV): mind. 75% Graslandprodukte in der Jahresration (Raufutter-Anteil).' },
+  { species: 'Rinder', age_class: 'Milchkuh', production_stage: 'Trockenstehend', feed_type: 'Heu, Duerrfutter', quantity_kg_day: null, energy_mj: 55, protein_g: 900, notes: 'Galtphase 6-8 Wochen. Energiereduziert fuettern. Mineralstoff-Ergaenzung (Ca, P, Mg). Uebergangsration 2 Wochen vor Abkalben.' },
+  { species: 'Rinder', age_class: 'Milchkuh', production_stage: 'GMF-Programm', feed_type: 'Graslandprodukte (mind. 75%)', quantity_kg_day: null, energy_mj: null, protein_g: null, notes: 'Graslandbasierte Milch- und Fleischproduktion (DZV): Mind. 75% der Ration aus Grasland (Heu, Gras, Grassilage). Max. 10% Kraftfutter (Getreide, Extraktionsschrote). Beitrag: 200 CHF/GVE. Foerdert Gruenland-Nutzung statt Ackerfutter-Import.' },
+
+  // Rinder — Aufzucht
+  { species: 'Rinder', age_class: 'Aufzuchtrind', production_stage: 'Aufzucht', feed_type: 'Heu, Grassilage, Mineralstoffe', quantity_kg_day: null, energy_mj: 45, protein_g: 500, notes: 'Tagesration: ca. 6-8 kg Trockenmasse Raufutter, ergaenzt mit Mineralstoffen. Erstkalbealter Ziel: 24-26 Monate. Gute Aufzucht = hohe Lebensleistung.' },
+  { species: 'Rinder', age_class: 'Kalb', production_stage: 'Aufzucht', feed_type: 'Milch/Milchaustauscher, Heu, Starterfutter', quantity_kg_day: null, energy_mj: 25, protein_g: 400, notes: 'Kolostrum (Biestmilch) in ersten 6h obligatorisch. Ab Woche 1 Heu und Wasser anbieten. Abtraenken ab 8-12 Wochen.' },
+
+  // Schweine
+  { species: 'Schweine', age_class: 'Mastschwein', production_stage: 'Mast', feed_type: 'Vormast-/Endmastfutter, Nebenprodukte', quantity_kg_day: 2.5, energy_mj: 33, protein_g: 380, notes: 'Phasenfuetterung: Vormast (25-60kg) proteinreicher, Endmast (60-110kg) energiereich, weniger Protein. Futterverwertung: ca. 2.8 kg Futter/kg Zuwachs. Schweizer Futtermittelbranche: viel Nebenprodukte (Molke, Schotte, Getreidenebenprodukte).' },
+  { species: 'Schweine', age_class: 'Zuchtsau', production_stage: 'Laktation', feed_type: 'Saeugefutter, ad libitum', quantity_kg_day: 6.0, energy_mj: 75, protein_g: 950, notes: 'Saeugende Sau: hoher Energiebedarf (10-14 Ferkel). Ad libitum fuettern ab Tag 3 nach Abferkeln. Wasserversorgung: mind. 20 Liter/Tag.' },
+  { species: 'Schweine', age_class: 'Absetzferkel', production_stage: 'Aufzucht', feed_type: 'Ferkelstarter, Prestarter', quantity_kg_day: 0.8, energy_mj: 14, protein_g: 180, notes: 'Absetzen mit 28-35 Tagen. Futterwechsel langsam (Verdauungsprobleme). Warm (28°C), trocken, zugfrei. N-reduzierte Fuetterung: Ressourceneffizienzbeitrag (DZV) fuer reduzierte N-Ausscheidung.' },
+
+  // Gefluegel
+  { species: 'Gefluegel', age_class: 'Legehenne', production_stage: 'Legeperiode', feed_type: 'Legemehl/Legekorn', quantity_kg_day: 0.12, energy_mj: 1.5, protein_g: 20, notes: 'Ca. 120 g Futter/Tag. Ca-Bedarf: 3.5-4.0 g/Tag (Eierschalenbildung). Muschelkalk als Calciumquelle. Legeleistung: 280-320 Eier/Jahr (Legehybride).' },
+  { species: 'Gefluegel', age_class: 'Mastpoulet', production_stage: 'Mast', feed_type: 'Starterfutter, Mastfutter, Endmastfutter', quantity_kg_day: null, energy_mj: null, protein_g: null, notes: 'Phasenfuetterung: Starter (Woche 1-2, 23% RP), Mast (Woche 3-5, 21% RP), Endmast (ab Woche 5, 19% RP). Schlachtalter konventionell: 35-42 Tage. Freiland/Bio: 56-81 Tage.' },
+
+  // Schafe
+  { species: 'Schafe', age_class: 'Mutterschaf', production_stage: 'Laktation', feed_type: 'Heu, Grassilage, Kraftfutter', quantity_kg_day: null, energy_mj: 18, protein_g: 220, notes: 'Saeugephase 6-8 Wochen. Energiebedarf steigt mit Lammanzahl. Gutes Heu + moderate Kraftfuttergabe. Mineralstoffe (Se, Co, Cu beachten).' },
+  { species: 'Schafe', age_class: 'Mastlamm', production_stage: 'Mast', feed_type: 'Weide, Heu, Kraftfutter', quantity_kg_day: null, energy_mj: 10, protein_g: 130, notes: 'Schlachtgewicht 38-42 kg lebend. Intensive Weidemast oder Stallmast. Tageszunahme Ziel: 250-350 g/Tag.' },
+
+  // Pferde
+  { species: 'Pferde', age_class: 'Pferd 500kg', production_stage: 'Erhaltung', feed_type: 'Heu, Stroh, Mineralstoffe', quantity_kg_day: 8.0, energy_mj: 70, protein_g: 500, notes: 'Raufutter bildet Basis (mind. 1.5 kg Heu/100 kg Koerpergewicht). Pferde: empfindliches Verdauungssystem, kleine Portionen, regelmaessig fuettern. Kein Silage fuer Pferde (Botulismus-Risiko).' },
+  { species: 'Pferde', age_class: 'Pferd 500kg', production_stage: 'Arbeit (mittel)', feed_type: 'Heu, Hafer, Mischfutter', quantity_kg_day: 10.0, energy_mj: 95, protein_g: 700, notes: 'Sportpferd/Arbeitspferd: erhoehter Energiebedarf. Hafer traditionelles Kraftfutter. Elektrolyte bei Schweissarbeit. Wasser ad libitum.' },
 ];
 
-// ---------------------------------------------------------------------------
-// 6. Insert data
-// ---------------------------------------------------------------------------
-
-console.log('Inserting crops...');
-const insertCrop = db.instance.prepare(
-  'INSERT OR REPLACE INTO crops (id, name, crop_group, typical_yield_t_ha, nutrient_offtake_n, nutrient_offtake_p2o5, nutrient_offtake_k2o, growth_stages, altitude_zone, jurisdiction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+const feedColumns = ['species', 'age_class', 'production_stage', 'feed_type', 'quantity_kg_day', 'energy_mj', 'protein_g', 'notes', 'language', 'jurisdiction'];
+batchInsert('feed_requirements', feedColumns,
+  feedRequirements.map(f => [f.species, f.age_class, f.production_stage, f.feed_type, f.quantity_kg_day, f.energy_mj, f.protein_g, f.notes, 'DE', 'CH'])
 );
-for (const c of crops) {
-  insertCrop.run(c.id, c.name, c.crop_group, c.typical_yield_t_ha, c.nutrient_offtake_n, c.nutrient_offtake_p2o5, c.nutrient_offtake_k2o, JSON.stringify(c.growth_stages), c.altitude_zone, 'CH');
-}
-console.log(`  ${crops.length} crops inserted`);
-
-console.log('Inserting soil types...');
-const insertSoil = db.instance.prepare(
-  'INSERT OR REPLACE INTO soil_types (id, name, soil_group, texture, drainage_class, ph_class, description) VALUES (?, ?, ?, ?, ?, ?, ?)'
-);
-for (const s of soilTypes) {
-  insertSoil.run(s.id, s.name, s.soil_group, s.texture, s.drainage_class, s.ph_class, s.description);
-}
-console.log(`  ${soilTypes.length} soil types inserted`);
-
-console.log('Inserting nutrient recommendations...');
-const insertRec = db.instance.prepare(
-  'INSERT OR REPLACE INTO nutrient_recommendations (crop_id, soil_group, altitude_zone, previous_crop_group, n_rec_kg_ha, p_rec_kg_ha, k_rec_kg_ha, mg_rec_kg_ha, notes, grud_section, jurisdiction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-for (const r of nutrientRecs) {
-  insertRec.run(r.crop_id, r.soil_group, r.altitude_zone, r.previous_crop_group, r.n_rec_kg_ha, r.p_rec_kg_ha, r.k_rec_kg_ha, r.mg_rec_kg_ha, r.notes, r.grud_section, 'CH');
-}
-console.log(`  ${nutrientRecs.length} nutrient recommendations inserted`);
-
-console.log('Inserting manure values...');
-const insertManure = db.instance.prepare(
-  'INSERT OR REPLACE INTO manure_values (animal_category, housing_system, n_per_gve, p2o5_per_gve, k2o_per_gve, nh3_loss_pct, notes, jurisdiction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-);
-for (const m of manureValues) {
-  insertManure.run(m.animal_category, m.housing_system, m.n_per_gve, m.p2o5_per_gve, m.k2o_per_gve, m.nh3_loss_pct, m.notes, 'CH');
-}
-console.log(`  ${manureValues.length} manure values inserted`);
-
-console.log('Inserting commodity prices...');
-const insertPrice = db.instance.prepare(
-  'INSERT OR REPLACE INTO commodity_prices (crop_id, market, price_per_tonne, currency, price_source, published_date, retrieved_at, source, jurisdiction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-for (const p of prices) {
-  insertPrice.run(p.crop_id, p.market, p.price_per_tonne, 'CHF', p.price_source, p.published_date, now, p.source, 'CH');
-}
-console.log(`  ${prices.length} prices inserted`);
 
 // ---------------------------------------------------------------------------
-// 7. Build FTS5 index
+// 7. Animal Health — Tiergesundheit, Tierseuchen, Praevention
+// ---------------------------------------------------------------------------
+
+interface AnimalHealth {
+  species: string;
+  condition: string;
+  symptoms: string;
+  prevention: string;
+  regulatory_status: string;
+  details: string;
+}
+
+const animalHealthData: AnimalHealth[] = [
+  // Rinder
+  { species: 'Rinder', condition: 'BVD (Bovine Virusdiarrhoe)', symptoms: 'Durchfall, Fieber, Aborte, Missbildungen bei Kaelbern (persistent infiziert, PI-Tiere)', prevention: 'Nationales BVD-Ausrottungsprogramm seit 2008. Ohrgewebeprobe bei Geburt (BVD-Antigentest). PI-Tiere muessen eliminiert werden.', regulatory_status: 'Zu bekaempfende Tierseuche (TSV), Meldepflicht', details: 'Schweiz praktisch BVD-frei seit ~2017. Letzte PI-Tiere werden nachverfolgt. Impfung verboten (stoert Surveillance).' },
+  { species: 'Rinder', condition: 'IBR (Infektioese Bovine Rhinotracheitis)', symptoms: 'Nasenausfluss, Fieber, Atemwegssymptome, Aborte', prevention: 'Schweiz gilt als IBR-frei. Import nur aus IBR-freien Bestaenden/Laendern. Ueberwachung durch Tankmilchproben.', regulatory_status: 'Zu bekaempfende Tierseuche (TSV), Meldepflicht', details: 'IBR-Freiheit seit 1993. Wichtiger Handelsvorteil fuer CH-Zuchtviehexport.' },
+  { species: 'Rinder', condition: 'Mastitis (Euterentzuendung)', symptoms: 'Geschwollenes Euter, Flocken/Klumpen in Milch, Fieber, Schmerzen', prevention: 'Melkhygiene, Zitzendesinfektion, regelmaessige Milchprobe (Zellzahlkontrolle), Trockenstellen mit Antibiotika oder Zitzenversiegler', regulatory_status: 'Keine Meldepflicht, aber wirtschaftlich bedeutendste Rinderkrankheit', details: 'Erreger: Staphylococcus aureus, Streptococcus uberis/agalactiae, E. coli. Zellzahl-Limite CH: 350000 Zellen/ml Tankmilch.' },
+  { species: 'Rinder', condition: 'Moderhinke (Klauenfaeule)', symptoms: 'Lahmheit, fauler Geruch, Klauenhorn-Abloesung, weisse Belaege', prevention: 'Klauenbad, Klauenpflege alle 6 Monate, trockene Laufflaechen, Sanierungsprogramm bei Bestandesproblem', regulatory_status: 'Zu ueberwachende Tierseuche (bei Schafen strikter)', details: 'Erreger: Dichelobacter nodosus. Problem besonders in feuchten Bedingungen. Auch bei Schafen und Ziegen.' },
+
+  // Schweine
+  { species: 'Schweine', condition: 'PRRS (Porzines Reproduktives und Respiratorisches Syndrom)', symptoms: 'Atemwegsprobleme, Aborte, Totgeburten, verminderte Fruchtbarkeit', prevention: 'Schweiz ist PRRS-frei. Strikte Importkontrollen. Quarantaene bei Import.', regulatory_status: 'Zu bekaempfende Tierseuche, Meldepflicht', details: 'PRRS-Freiheit ist wichtiger Statusvorteil der Schweizer Schweinezucht.' },
+  { species: 'Schweine', condition: 'Afrikanische Schweinepest (ASP)', symptoms: 'Hohes Fieber, Hautblutungen, Aborte, schneller Tod', prevention: 'Praevention: kein Futter aus Kuechen/Restaurants an Schweine verfuettern, Wildschwein-Monitoring, Biosicherheit auf Betrieb', regulatory_status: 'Hochansteckende Seuche, sofortige Meldepflicht, Tilgung', details: 'ASP noch nicht in der Schweiz (Stand 2026). Notfallplaene vorhanden. Wildschweinguertel in Grenznaehe zu EU-Ausbruchsgebieten.' },
+  { species: 'Schweine', condition: 'Salmonellose', symptoms: 'Durchfall, Fieber, bei Sauen: Aborte, Ferkelsterblichkeit', prevention: 'Hygiene, Reinigungs-/Desinfektionsprogramm, Rein-Raus-Verfahren, Futtermittelhygiene', regulatory_status: 'Meldepflicht (Salmonella Enteritidis und Typhimurium)', details: 'Nationales Salmonellen-Bekaempfungsprogramm bei Zuchtbetrieben. IS ABV-Meldung bei Antibiotikabehandlung.' },
+
+  // Gefluegel
+  { species: 'Gefluegel', condition: 'Aviäre Influenza (Vogelgrippe)', symptoms: 'Hohes Fieber, Atemwegssymptome, starker Legeabfall, hohe Mortalitaet (hochpathogen)', prevention: 'Aufstallungspflicht bei erhoehtem Risiko (Herbst/Winter, Vogelzug). Biosicherheit: Handewaschen, Schuhwechsel, kein Kontakt mit Wildvoegeln.', regulatory_status: 'Hochansteckende Tierseuche, sofortige Meldepflicht, Sperrzone', details: 'BLV verordnet periodisch Aufstallungspflicht waehrend Vogelzugsaison. Impfung in CH nicht erlaubt (EU-Handelsvorgaben).' },
+  { species: 'Gefluegel', condition: 'Salmonellose Gefluegel', symptoms: 'Oft subklinisch bei adulten Tieren, Kueckensterben, verunreinigte Eier', prevention: 'Nationales Salmonellen-Bekaempfungsprogramm: Pflichtuntersuchung aller Legehennenbetriebe >1000 Plaetze. Impfung moeglich.', regulatory_status: 'Meldepflicht (S. Enteritidis, S. Typhimurium), Bestandessanierung', details: 'Schweiz hat tiefe Salmonellen-Praevalenz dank konsequenter Bekaempfung. Eier: Stempelung mit Betriebsnummer obligatorisch.' },
+  { species: 'Gefluegel', condition: 'Kokzidiose', symptoms: 'Blutiger Durchfall, Abmagerung, verminderte Leistung', prevention: 'Impfung (Lebendvakzine bei Legehennen), Hygiene, Einstreumanagement', regulatory_status: 'Keine Meldepflicht', details: 'Haeufigste parasitaere Erkrankung beim Gefluegel. Erreger: Eimeria spp. Antiparasitika (Kokzidiostatika) in CH reguliert.' },
+
+  // Schafe
+  { species: 'Schafe', condition: 'Moderhinke (Klauenfaeule Schafe)', symptoms: 'Starke Lahmheit, fauler Geruch, Klauenhorn-Abloesung', prevention: 'Klauenbad, Separierung lahmer Tiere, Bestandessanierung (Impfung Footvax), trockene Weide', regulatory_status: 'Zu bekaempfende Tierseuche bei Schafen (TSV Art. 227a, seit 2024)', details: 'Moderhinke bei Schafen seit 2024 meldepflichtig und bekaempfungspflichtig in der Schweiz. Kantonale Bekaempfungsprogramme.' },
+  { species: 'Schafe', condition: 'Parasitenbefall (Magen-Darm-Wuermer)', symptoms: 'Abmagerung, Durchfall, Blutarmut, Flaschenhals (Haemonchus)', prevention: 'Weidemanagement (Rotation), gezielte Entwurmung (selektiv, nicht Giesskanne), Weidewechsel nach Behandlung', regulatory_status: 'Keine Meldepflicht', details: 'Magen-Darm-Nematoden: haeufigste Gesundheitsproblem bei Weideschafen. Resistenzen gegen Entwurmungsmittel zunehmend — selektive Behandlung (FEC-Methode).' },
+
+  // Allgemein
+  { species: 'Rinder', condition: 'Tuberkulose (Bovine TB)', symptoms: 'Chronischer Husten, Abmagerung, geschwollene Lymphknoten', prevention: 'Schweiz gilt als TB-frei seit 1959. Ueberwachung durch Schlachthofkontrolle (Fleischbeschau). Import nur aus TB-freien Laendern.', regulatory_status: 'Auszurottende Tierseuche, sofortige Meldepflicht', details: 'Sporadische Einzelfaelle durch Import oder Wildtierkontakt. Sofortige Bestandessperre und Untersuchung bei Verdacht.' },
+];
+
+const healthColumns = ['species', 'condition', 'symptoms', 'prevention', 'regulatory_status', 'details', 'language', 'jurisdiction'];
+batchInsert('animal_health', healthColumns,
+  animalHealthData.map(h => [h.species, h.condition, h.symptoms, h.prevention, h.regulatory_status, h.details, 'DE', 'CH'])
+);
+
+// ---------------------------------------------------------------------------
+// 8. FTS5 Search Index — All data indexed for full-text search
 // ---------------------------------------------------------------------------
 
 console.log('Building FTS5 search index...');
-db.instance.exec('DELETE FROM search_index');
 
-// Index crops
-for (const c of crops) {
-  db.instance.prepare(
-    'INSERT INTO search_index (title, body, crop_group, jurisdiction) VALUES (?, ?, ?, ?)'
-  ).run(
-    c.name,
-    `${c.name} ${c.crop_group} Ertrag ${c.typical_yield_t_ha} t/ha N-Entzug ${c.nutrient_offtake_n} kg/ha P2O5 ${c.nutrient_offtake_p2o5} K2O ${c.nutrient_offtake_k2o} ${c.growth_stages.join(' ')} ${c.altitude_zone}`,
-    c.crop_group,
-    'CH'
+// Index welfare standards
+const welfareRows = db.all<{ species: string; production_system: string; requirement: string; details: string }>(
+  'SELECT species, production_system, requirement, details FROM welfare_standards'
+);
+for (const row of welfareRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [row.requirement, `${row.production_system}: ${row.details}`, row.species, 'Tierschutz/Welfare', 'CH']
   );
 }
 
-// Index soil types
-for (const s of soilTypes) {
-  db.instance.prepare(
-    'INSERT INTO search_index (title, body, crop_group, jurisdiction) VALUES (?, ?, ?, ?)'
-  ).run(
-    s.name,
-    `${s.name} Bodengruppe ${s.soil_group} Textur ${s.texture} Drainage ${s.drainage_class} pH-Klasse ${s.ph_class} ${s.description}`,
-    'boden',
-    'CH'
+// Index stocking densities
+const stockingRows = db.all<{ species: string; age_class: string; housing_type: string; regulatory_minimum: string }>(
+  'SELECT species, age_class, housing_type, regulatory_minimum FROM stocking_densities'
+);
+for (const row of stockingRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [`Besatzdichte ${row.age_class} ${row.housing_type}`, row.regulatory_minimum, row.species, 'Platzbedarf/Besatzdichte', 'CH']
   );
 }
 
-// Index nutrient recs
-for (const r of nutrientRecs) {
-  const crop = crops.find(c => c.id === r.crop_id);
-  db.instance.prepare(
-    'INSERT INTO search_index (title, body, crop_group, jurisdiction) VALUES (?, ?, ?, ?)'
-  ).run(
-    `GRUD Empfehlung ${crop?.name ?? r.crop_id}`,
-    `${crop?.name ?? r.crop_id} Bodengruppe ${r.soil_group} ${r.altitude_zone} N ${r.n_rec_kg_ha} P ${r.p_rec_kg_ha} K ${r.k_rec_kg_ha} Mg ${r.mg_rec_kg_ha} ${r.notes}`,
-    crop?.crop_group ?? 'empfehlung',
-    'CH'
+// Index housing requirements
+const housingRows = db.all<{ species: string; age_class: string; system: string; space: string; ventilation: string; flooring: string; temperature: string }>(
+  'SELECT species, age_class, system, space, ventilation, flooring, temperature FROM housing_requirements'
+);
+for (const row of housingRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [
+      `Stallbau ${row.age_class} ${row.system}`,
+      `Platz: ${row.space}. Lueftung: ${row.ventilation}. Boden: ${row.flooring}. Temperatur: ${row.temperature}`,
+      row.species,
+      'Stallbau/Housing',
+      'CH',
+    ]
   );
 }
 
-// Index manure values
-for (const m of manureValues) {
-  db.instance.prepare(
-    'INSERT INTO search_index (title, body, crop_group, jurisdiction) VALUES (?, ?, ?, ?)'
-  ).run(
-    `Hofduenger ${m.animal_category} ${m.housing_system}`,
-    `${m.animal_category} ${m.housing_system} N ${m.n_per_gve} P2O5 ${m.p2o5_per_gve} K2O ${m.k2o_per_gve} NH3-Verlust ${m.nh3_loss_pct}% ${m.notes}`,
-    'hofduenger',
-    'CH'
+// Index movement rules
+const movementRows = db.all<{ species: string; rule_type: string; description: string }>(
+  'SELECT species, rule_type, description FROM movement_rules'
+);
+for (const row of movementRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [`${row.rule_type} ${row.species}`, row.description, row.species, 'TVD/Transport/Soemmerung', 'CH']
   );
 }
 
-console.log('FTS5 index built');
+// Index breeds
+const breedRows = db.all<{ species: string; name: string; purpose: string; notes: string }>(
+  'SELECT species, name, purpose, notes FROM breeds'
+);
+for (const row of breedRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [row.name, `${row.purpose}. ${row.notes}`, row.species, 'Zucht/Rassen', 'CH']
+  );
+}
+
+// Index feed requirements
+const feedRows = db.all<{ species: string; age_class: string; production_stage: string; feed_type: string; notes: string }>(
+  'SELECT species, age_class, production_stage, feed_type, notes FROM feed_requirements'
+);
+for (const row of feedRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [`Fuetterung ${row.age_class} ${row.production_stage}`, `${row.feed_type}. ${row.notes}`, row.species, 'Fuetterung/Ernaehrung', 'CH']
+  );
+}
+
+// Index animal health
+const healthRows = db.all<{ species: string; condition: string; symptoms: string; prevention: string; details: string }>(
+  'SELECT species, condition, symptoms, prevention, details FROM animal_health'
+);
+for (const row of healthRows) {
+  db.run(
+    'INSERT INTO search_index (title, body, species, category, jurisdiction) VALUES (?, ?, ?, ?, ?)',
+    [row.condition, `Symptome: ${row.symptoms}. Praevention: ${row.prevention}. ${row.details}`, row.species, 'Tiergesundheit', 'CH']
+  );
+}
 
 // ---------------------------------------------------------------------------
-// 8. Update metadata
+// 9. Metadata + Coverage
 // ---------------------------------------------------------------------------
 
-db.instance.prepare('INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)').run('last_ingest', now);
-db.instance.prepare('INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)').run('build_date', now);
-console.log(`Metadata updated: last_ingest=${now}`);
+db.run("INSERT OR REPLACE INTO db_metadata (key, value) VALUES ('last_ingest', ?)", [now]);
+db.run("INSERT OR REPLACE INTO db_metadata (key, value) VALUES ('build_date', ?)", [now]);
+db.run("INSERT OR REPLACE INTO db_metadata (key, value) VALUES ('schema_version', '1.0')", []);
 
-// ---------------------------------------------------------------------------
-// 9. Write coverage.json
-// ---------------------------------------------------------------------------
+// Count records
+const counts = {
+  welfare_standards: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM welfare_standards') as { c: number }).c,
+  stocking_densities: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM stocking_densities') as { c: number }).c,
+  housing_requirements: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM housing_requirements') as { c: number }).c,
+  movement_rules: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM movement_rules') as { c: number }).c,
+  breeds: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM breeds') as { c: number }).c,
+  feed_requirements: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM feed_requirements') as { c: number }).c,
+  animal_health: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM animal_health') as { c: number }).c,
+  search_index: (db.get<{ c: number }>('SELECT COUNT(*) as c FROM search_index') as { c: number }).c,
+};
 
+console.log('Ingestion complete:');
+console.log(`  welfare_standards: ${counts.welfare_standards}`);
+console.log(`  stocking_densities: ${counts.stocking_densities}`);
+console.log(`  housing_requirements: ${counts.housing_requirements}`);
+console.log(`  movement_rules: ${counts.movement_rules}`);
+console.log(`  breeds: ${counts.breeds}`);
+console.log(`  feed_requirements: ${counts.feed_requirements}`);
+console.log(`  animal_health: ${counts.animal_health}`);
+console.log(`  search_index: ${counts.search_index}`);
+
+// Write coverage.json
 const coverage = {
-  server: 'ch-crop-nutrients-mcp',
+  server: 'ch-livestock-mcp',
   jurisdiction: 'CH',
   version: '0.1.0',
   last_ingest: now,
-  data: {
-    crops: crops.length,
-    soil_types: soilTypes.length,
-    nutrient_recommendations: nutrientRecs.length,
-    manure_values: manureValues.length,
-    commodity_prices: prices.length,
-  },
+  data: counts,
   tools: 11,
-  sources: ['GRUD 2017 (Agroscope)', 'Suisse-Bilanz Wegleitung (BLW)', 'AGRIDEA', 'SBV/swiss granum'],
+  sources: [
+    'TSchV — Tierschutzverordnung (BLV)',
+    'DZV — RAUS/BTS-Programme (BLW)',
+    'TVD — Tierverkehrsdatenbank (Identitas)',
+    'Zuchtorganisationen (Braunvieh Schweiz, swissherdbook, Suisseporcs)',
+  ],
 };
 
-writeFileSync('data/coverage.json', JSON.stringify(coverage, null, 2));
-console.log('Coverage written to data/coverage.json');
-
-// ---------------------------------------------------------------------------
-// 10. Write sources.yml
-// ---------------------------------------------------------------------------
-
-const sourcesYml = `# Data sources for ch-crop-nutrients-mcp
-sources:
-  - name: GRUD 2017
-    authority: Agroscope
-    url: https://www.agroscope.admin.ch/agroscope/de/home/themen/pflanzenbau/duengung.html
-    license: Swiss Federal Administration — free reuse
-    update_frequency: periodic (major revision ~10 years)
-    last_retrieved: "${now}"
-
-  - name: Suisse-Bilanz Wegleitung
-    authority: Bundesamt fuer Landwirtschaft (BLW)
-    url: https://www.blw.admin.ch/blw/de/home/instrumente/direktzahlungen/oekologischer-leistungsnachweis.html
-    license: Swiss Federal Administration — free reuse
-    update_frequency: annual (with DZV updates)
-    last_retrieved: "${now}"
-
-  - name: swiss granum Richtpreise
-    authority: swiss granum / SBV
-    url: https://www.swissgranum.ch/richtpreise
-    license: Public price information
-    update_frequency: annual (harvest season)
-    last_retrieved: "${now}"
-
-  - name: swisspatat Richtpreise
-    authority: swisspatat
-    url: https://www.swisspatat.ch
-    license: Public price information
-    update_frequency: seasonal
-    last_retrieved: "${now}"
-`;
-
-writeFileSync('data/sources.yml', sourcesYml);
-console.log('Sources written to data/sources.yml');
+writeFileSync('data/coverage.json', JSON.stringify(coverage, null, 2) + '\n');
+console.log('Written data/coverage.json');
 
 db.close();
-console.log('\\nIngestion complete.');
+console.log('Done.');

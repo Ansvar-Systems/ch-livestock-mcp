@@ -1,29 +1,29 @@
-# Data sources for ch-crop-nutrients-mcp
+# Data sources for ch-livestock-mcp
 sources:
-  - name: GRUD 2017
-    authority: Agroscope
-    url: https://www.agroscope.admin.ch/agroscope/de/home/themen/pflanzenbau/duengung.html
+  - name: Tierschutzverordnung (TSchV, SR 455.1)
+    authority: Bundesamt fuer Lebensmittelsicherheit und Veterinaerwesen (BLV)
+    url: https://www.fedlex.admin.ch/eli/cc/2008/416/de
     license: Swiss Federal Administration — free reuse
-    update_frequency: periodic (major revision ~10 years)
+    update_frequency: periodic (amended as needed)
     last_retrieved: "2026-04-05"
 
-  - name: Suisse-Bilanz Wegleitung
+  - name: Direktzahlungsverordnung (DZV) — RAUS/BTS
     authority: Bundesamt fuer Landwirtschaft (BLW)
-    url: https://www.blw.admin.ch/blw/de/home/instrumente/direktzahlungen/oekologischer-leistungsnachweis.html
+    url: https://www.blw.admin.ch/blw/de/home/instrumente/direktzahlungen/produktionssystembeitraege/tierwohlbeitraege.html
     license: Swiss Federal Administration — free reuse
     update_frequency: annual (with DZV updates)
     last_retrieved: "2026-04-05"
 
-  - name: swiss granum Richtpreise
-    authority: swiss granum / SBV
-    url: https://www.swissgranum.ch/richtpreise
-    license: Public price information
-    update_frequency: annual (harvest season)
+  - name: Tierverkehrsdatenbank (TVD)
+    authority: Identitas AG / BLV
+    url: https://www.identitas.ch/tvd
+    license: Public regulatory information
+    update_frequency: continuous (rules updated periodically)
     last_retrieved: "2026-04-05"
 
-  - name: swisspatat Richtpreise
-    authority: swisspatat
-    url: https://www.swisspatat.ch
-    license: Public price information
-    update_frequency: seasonal
+  - name: Zuchtorganisationen
+    authority: Braunvieh Schweiz, swissherdbook, Mutterkuh Schweiz, Suisseporcs, SZZV
+    url: https://www.braunvieh.ch
+    license: Public breed information
+    update_frequency: annual
     last_retrieved: "2026-04-05"

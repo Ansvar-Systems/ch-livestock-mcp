@@ -42,71 +42,88 @@ export function createDatabase(dbPath?: string): Database {
 
 function initSchema(db: BetterSqlite3.Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS crops (
-      id TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS welfare_standards (
+      id INTEGER PRIMARY KEY,
+      species TEXT NOT NULL,
+      production_system TEXT NOT NULL,
+      requirement TEXT NOT NULL,
+      min_space_m2 REAL,
+      details TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
+      jurisdiction TEXT NOT NULL DEFAULT 'CH'
+    );
+
+    CREATE TABLE IF NOT EXISTS stocking_densities (
+      id INTEGER PRIMARY KEY,
+      species TEXT NOT NULL,
+      age_class TEXT NOT NULL,
+      housing_type TEXT NOT NULL,
+      animals_per_m2 REAL,
+      regulatory_minimum TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
+      jurisdiction TEXT NOT NULL DEFAULT 'CH'
+    );
+
+    CREATE TABLE IF NOT EXISTS housing_requirements (
+      id INTEGER PRIMARY KEY,
+      species TEXT NOT NULL,
+      age_class TEXT NOT NULL,
+      system TEXT NOT NULL,
+      space TEXT,
+      ventilation TEXT,
+      flooring TEXT,
+      temperature TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
+      jurisdiction TEXT NOT NULL DEFAULT 'CH'
+    );
+
+    CREATE TABLE IF NOT EXISTS movement_rules (
+      id INTEGER PRIMARY KEY,
+      species TEXT NOT NULL,
+      rule_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'DE',
+      jurisdiction TEXT NOT NULL DEFAULT 'CH'
+    );
+
+    CREATE TABLE IF NOT EXISTS breeds (
+      id INTEGER PRIMARY KEY,
+      species TEXT NOT NULL,
       name TEXT NOT NULL,
-      crop_group TEXT NOT NULL,
-      typical_yield_t_ha REAL,
-      nutrient_offtake_n REAL,
-      nutrient_offtake_p2o5 REAL,
-      nutrient_offtake_k2o REAL,
-      growth_stages TEXT,
-      altitude_zone TEXT DEFAULT 'talzone',
-      jurisdiction TEXT NOT NULL DEFAULT 'CH'
-    );
-
-    CREATE TABLE IF NOT EXISTS soil_types (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      soil_group INTEGER,
-      texture TEXT,
-      drainage_class TEXT,
-      ph_class TEXT,
-      description TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS nutrient_recommendations (
-      id INTEGER PRIMARY KEY,
-      crop_id TEXT REFERENCES crops(id),
-      soil_group INTEGER,
-      altitude_zone TEXT DEFAULT 'talzone',
-      previous_crop_group TEXT,
-      n_rec_kg_ha REAL,
-      p_rec_kg_ha REAL,
-      k_rec_kg_ha REAL,
-      mg_rec_kg_ha REAL,
+      purpose TEXT,
       notes TEXT,
-      grud_section TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
       jurisdiction TEXT NOT NULL DEFAULT 'CH'
     );
 
-    CREATE TABLE IF NOT EXISTS manure_values (
+    CREATE TABLE IF NOT EXISTS feed_requirements (
       id INTEGER PRIMARY KEY,
-      animal_category TEXT NOT NULL,
-      housing_system TEXT,
-      n_per_gve REAL,
-      p2o5_per_gve REAL,
-      k2o_per_gve REAL,
-      nh3_loss_pct REAL,
+      species TEXT NOT NULL,
+      age_class TEXT NOT NULL,
+      production_stage TEXT,
+      feed_type TEXT,
+      quantity_kg_day REAL,
+      energy_mj REAL,
+      protein_g REAL,
       notes TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
       jurisdiction TEXT NOT NULL DEFAULT 'CH'
     );
 
-    CREATE TABLE IF NOT EXISTS commodity_prices (
+    CREATE TABLE IF NOT EXISTS animal_health (
       id INTEGER PRIMARY KEY,
-      crop_id TEXT REFERENCES crops(id),
-      market TEXT,
-      price_per_tonne REAL,
-      currency TEXT DEFAULT 'CHF',
-      price_source TEXT NOT NULL,
-      published_date TEXT,
-      retrieved_at TEXT,
-      source TEXT,
+      species TEXT NOT NULL,
+      condition TEXT NOT NULL,
+      symptoms TEXT,
+      prevention TEXT,
+      regulatory_status TEXT,
+      details TEXT,
+      language TEXT NOT NULL DEFAULT 'DE',
       jurisdiction TEXT NOT NULL DEFAULT 'CH'
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
-      title, body, crop_group, jurisdiction
+      title, body, species, category, jurisdiction
     );
 
     CREATE TABLE IF NOT EXISTS db_metadata (
@@ -115,20 +132,21 @@ function initSchema(db: BetterSqlite3.Database): void {
     );
 
     INSERT OR IGNORE INTO db_metadata (key, value) VALUES ('schema_version', '1.0');
-    INSERT OR IGNORE INTO db_metadata (key, value) VALUES ('mcp_name', 'Switzerland Crop Nutrients MCP');
+    INSERT OR IGNORE INTO db_metadata (key, value) VALUES ('mcp_name', 'Switzerland Livestock MCP');
     INSERT OR IGNORE INTO db_metadata (key, value) VALUES ('jurisdiction', 'CH');
   `);
 }
 
-const FTS_COLUMNS = ['title', 'body', 'crop_group', 'jurisdiction'];
+const FTS_COLUMNS = ['title', 'body', 'species', 'category', 'jurisdiction'];
 
 export function ftsSearch(
   db: Database,
   query: string,
-  limit: number = 20
-): { title: string; body: string; crop_group: string; jurisdiction: string; rank: number }[] {
-  const { results } = tieredFtsSearch(db, 'search_index', FTS_COLUMNS, query, limit);
-  return results as { title: string; body: string; crop_group: string; jurisdiction: string; rank: number }[];
+  limit: number = 20,
+  species?: string
+): { title: string; body: string; species: string; category: string; jurisdiction: string; rank: number }[] {
+  const { results } = tieredFtsSearch(db, 'search_index', FTS_COLUMNS, query, limit, species);
+  return results as { title: string; body: string; species: string; category: string; jurisdiction: string; rank: number }[];
 }
 
 /**
@@ -140,7 +158,8 @@ export function tieredFtsSearch(
   table: string,
   columns: string[],
   query: string,
-  limit: number = 20
+  limit: number = 20,
+  species?: string
 ): { tier: string; results: Record<string, unknown>[] } {
   const sanitized = sanitizeFtsInput(query);
   if (!sanitized.trim()) return { tier: 'empty', results: [] };
@@ -151,48 +170,56 @@ export function tieredFtsSearch(
 
   // Tier 1: Exact phrase
   const phrase = `"${sanitized}"`;
-  let results = tryFts(db, select, table, order, phrase, limit);
+  let results = tryFts(db, select, table, order, phrase, limit, species);
   if (results.length > 0) return { tier: 'phrase', results };
 
   // Tier 2: AND
   const words = sanitized.split(/\s+/).filter(w => w.length > 1);
   if (words.length > 1) {
     const andQuery = words.join(' AND ');
-    results = tryFts(db, select, table, order, andQuery, limit);
+    results = tryFts(db, select, table, order, andQuery, limit, species);
     if (results.length > 0) return { tier: 'and', results };
   }
 
   // Tier 3: Prefix
   const prefixQuery = words.map(w => `${w}*`).join(' AND ');
-  results = tryFts(db, select, table, order, prefixQuery, limit);
+  results = tryFts(db, select, table, order, prefixQuery, limit, species);
   if (results.length > 0) return { tier: 'prefix', results };
 
   // Tier 4: Stemmed prefix
   const stemmed = words.map(w => stemWord(w) + '*');
   const stemmedQuery = stemmed.join(' AND ');
   if (stemmedQuery !== prefixQuery) {
-    results = tryFts(db, select, table, order, stemmedQuery, limit);
+    results = tryFts(db, select, table, order, stemmedQuery, limit, species);
     if (results.length > 0) return { tier: 'stemmed', results };
   }
 
   // Tier 5: OR
   if (words.length > 1) {
     const orQuery = words.join(' OR ');
-    results = tryFts(db, select, table, order, orQuery, limit);
+    results = tryFts(db, select, table, order, orQuery, limit, species);
     if (results.length > 0) return { tier: 'or', results };
   }
 
-  // Tier 6: LIKE fallback
-  const baseCols = ['name', 'crop_group'];
+  // Tier 6: LIKE fallback on search_index content
   const likeConditions = words.map(() =>
-    `(${baseCols.map(c => `${c} LIKE ?`).join(' OR ')})`
+    `(title LIKE ? OR body LIKE ? OR species LIKE ?)`
   ).join(' AND ');
-  const likeParams = words.flatMap(w =>
-    baseCols.map(() => `%${w}%`)
-  );
+  const likeParams = words.flatMap(w => [`%${w}%`, `%${w}%`, `%${w}%`]);
+  if (species) {
+    try {
+      const likeResults = db.all<Record<string, unknown>>(
+        `SELECT title, body, species, category, jurisdiction FROM search_index WHERE ${likeConditions} AND species LIKE ? LIMIT ?`,
+        [...likeParams, `%${species}%`, limit]
+      );
+      if (likeResults.length > 0) return { tier: 'like', results: likeResults };
+    } catch {
+      // LIKE fallback failed
+    }
+  }
   try {
     const likeResults = db.all<Record<string, unknown>>(
-      `SELECT name as title, COALESCE(growth_stages, '') as body, crop_group, jurisdiction FROM crops WHERE ${likeConditions} LIMIT ?`,
+      `SELECT title, body, species, category, jurisdiction FROM search_index WHERE ${likeConditions} LIMIT ?`,
       [...likeParams, limit]
     );
     if (likeResults.length > 0) return { tier: 'like', results: likeResults };
@@ -205,9 +232,19 @@ export function tieredFtsSearch(
 
 function tryFts(
   db: Database, select: string, table: string,
-  order: string, matchExpr: string, limit: number
+  order: string, matchExpr: string, limit: number,
+  species?: string
 ): Record<string, unknown>[] {
   try {
+    if (species) {
+      const filtered = db.all(
+        `${select} WHERE ${table} MATCH ? ${order}`,
+        [matchExpr, limit * 3]
+      );
+      return (filtered as Record<string, unknown>[]).filter(
+        r => (r.species as string || '').toLowerCase().includes(species.toLowerCase())
+      ).slice(0, limit);
+    }
     return db.all(
       `${select} WHERE ${table} MATCH ? ${order}`,
       [matchExpr, limit]
@@ -219,7 +256,7 @@ function tryFts(
 
 function sanitizeFtsInput(query: string): string {
   return query
-    .replace(/["""'',,,,]/g, '"')
+    .replace(/["\u201C\u201D\u2018\u2019\uFF0C\u3001\uFF1B\u3002]/g, '"')
     .replace(/[^a-zA-Z0-9\s*"_\u00C0-\u024F-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
