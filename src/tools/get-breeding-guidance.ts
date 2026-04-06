@@ -1,5 +1,6 @@
 import { buildMeta } from '../metadata.js';
 import { validateJurisdiction } from '../jurisdiction.js';
+import { speciesWhereClause, knownSpeciesList } from '../species-aliases.js';
 import type { Database } from '../db.js';
 
 interface BreedingArgs {
@@ -8,23 +9,43 @@ interface BreedingArgs {
   jurisdiction?: string;
 }
 
+type BreedRow = {
+  id: number; species: string; name: string; purpose: string; notes: string;
+};
+
+function formatResult(
+  results: BreedRow[],
+  species: string,
+  jurisdiction: string,
+  hint?: string,
+) {
+  const out: Record<string, unknown> = {
+    species,
+    topic_filter: null as string | null,
+    jurisdiction,
+    results_count: results.length,
+    results,
+    _meta: buildMeta(),
+  };
+  if (hint) out._hint = hint;
+  return out;
+}
+
 export function handleGetBreedingGuidance(db: Database, args: BreedingArgs) {
   const jv = validateJurisdiction(args.jurisdiction);
   if (!jv.valid) return jv.error;
 
-  let sql = 'SELECT * FROM breeds WHERE LOWER(species) = LOWER(?) AND jurisdiction = ?';
-  const params: unknown[] = [args.species, jv.jurisdiction];
+  const sw = speciesWhereClause(args.species);
 
-  sql += ' ORDER BY name';
+  const sql = `SELECT * FROM breeds WHERE ${sw.clause} AND jurisdiction = ? ORDER BY name`;
+  const params: unknown[] = [...sw.params, jv.jurisdiction];
 
-  const breeds = db.all<{
-    id: number; species: string; name: string; purpose: string; notes: string;
-  }>(sql, params);
+  const breeds = db.all<BreedRow>(sql, params);
 
   if (breeds.length === 0) {
     return {
       error: 'not_found',
-      message: `No breed data found for species '${args.species}'. Available species: Rinder, Schweine, Schafe, Ziegen, Pferde.`,
+      message: `No breed data found for species '${args.species}'. Available species: ${knownSpeciesList()}.`,
     };
   }
 
@@ -36,18 +57,17 @@ export function handleGetBreedingGuidance(db: Database, args: BreedingArgs) {
       const text = [b.name, b.purpose, b.notes].filter(Boolean).join(' ').toLowerCase();
       return text.includes(topicLower);
     });
-    // If topic filter yields nothing, return all breeds with a note
+    // If topic filter yields nothing, return all breeds with a hint
     if (filtered.length === 0) {
-      filtered = breeds;
+      const topics = [...new Set(breeds.map(b => b.purpose).filter(Boolean))];
+      const result = formatResult(breeds, args.species, jv.jurisdiction,
+        `topic '${args.topic}' not found. Available purposes: ${topics.join(', ')}. Showing all results.`);
+      result.topic_filter = args.topic;
+      return result;
     }
   }
 
-  return {
-    species: args.species,
-    topic_filter: args.topic ?? null,
-    jurisdiction: jv.jurisdiction,
-    results_count: filtered.length,
-    results: filtered,
-    _meta: buildMeta(),
-  };
+  const result = formatResult(filtered, args.species, jv.jurisdiction);
+  result.topic_filter = args.topic ?? null;
+  return result;
 }

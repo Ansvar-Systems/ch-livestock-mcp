@@ -46,8 +46,8 @@ const TOOLS = [
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Free-text search query (German or English)' },
-        species: { type: 'string', description: 'Filter by species (e.g. Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
         limit: { type: 'number', description: 'Max results (default: 20, max: 50)' },
       },
       required: ['query'],
@@ -59,9 +59,9 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         production_system: { type: 'string', description: 'Production system filter (e.g. TSchV-Minimum, RAUS, BTS)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },
@@ -72,10 +72,10 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         age_class: { type: 'string', description: 'Age/weight class (e.g. Milchkuh, Kalb, Mastschwein >60kg, Legehenne)' },
         housing_type: { type: 'string', description: 'Housing type (e.g. Laufstall, Anbindestall, Voliere, Freilandhaltung)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },
@@ -86,10 +86,10 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         age_class: { type: 'string', description: 'Age class (e.g. Milchkuh, Aufzuchtrind, Mastschwein, Legehenne)' },
         production_stage: { type: 'string', description: 'Production stage (e.g. Laktation, Trockenstehend, Mast, Aufzucht)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },
@@ -101,8 +101,8 @@ const TOOLS = [
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query (e.g. Salmonellen, BVD, Moderhinke, Mastitits)' },
-        species: { type: 'string', description: 'Filter by species' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['query'],
     },
@@ -113,10 +113,10 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         age_class: { type: 'string', description: 'Age class (e.g. Milchkuh, Mastschwein, Legehenne)' },
         system: { type: 'string', description: 'Housing system (e.g. Laufstall, Anbindestall, Voliere, BTS)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },
@@ -127,9 +127,9 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Gefluegel, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         rule_type: { type: 'string', description: 'Rule type: TVD, Transport, Soemmerung, Schlachtung' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },
@@ -140,9 +140,9 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        species: { type: 'string', description: 'Species: Rinder, Schweine, Schafe, Ziegen, Pferde' },
+        species: { type: 'string', description: 'Species name. DB values: Rinder, Schweine, Schafe, Ziegen, Pferde. English aliases (cattle, pig, sheep, goat, horse, poultry) are also accepted.' },
         topic: { type: 'string', description: 'Topic filter (e.g. Zweinutzung, Milch, Fleisch, Alp)' },
-        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code (default: CH)' },
+        jurisdiction: { type: 'string', description: 'ISO 3166-1 alpha-2 code. Default: CH. Only CH is supported.' },
       },
       required: ['species'],
     },

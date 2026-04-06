@@ -1,5 +1,6 @@
 import { buildMeta } from '../metadata.js';
 import { validateJurisdiction } from '../jurisdiction.js';
+import { resolveSpecies } from '../species-aliases.js';
 import type { Database } from '../db.js';
 
 interface HealthSearchArgs {
@@ -16,8 +17,10 @@ export function handleSearchAnimalHealth(db: Database, args: HealthSearchArgs) {
   const params: unknown[] = [jv.jurisdiction];
 
   if (args.species) {
-    sql += ' AND LOWER(species) = LOWER(?)';
-    params.push(args.species);
+    const resolved = resolveSpecies(args.species);
+    const placeholders = resolved.map(() => '?').join(', ');
+    sql += ` AND LOWER(species) IN (${placeholders})`;
+    params.push(...resolved.map(s => s.toLowerCase()));
   }
 
   const all = db.all<{

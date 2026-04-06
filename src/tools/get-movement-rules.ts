@@ -1,5 +1,6 @@
 import { buildMeta } from '../metadata.js';
 import { validateJurisdiction } from '../jurisdiction.js';
+import { speciesWhereClause, knownSpeciesList } from '../species-aliases.js';
 import type { Database } from '../db.js';
 
 interface MovementArgs {
@@ -8,12 +9,38 @@ interface MovementArgs {
   jurisdiction?: string;
 }
 
+type MovementRow = {
+  id: number; species: string; rule_type: string; description: string;
+};
+
+function formatResult(
+  results: MovementRow[],
+  species: string,
+  jurisdiction: string,
+  hint?: string,
+) {
+  const out: Record<string, unknown> = {
+    species,
+    jurisdiction,
+    results_count: results.length,
+    results,
+    _meta: buildMeta(),
+  };
+  if (hint) out._hint = hint;
+  return out;
+}
+
 export function handleGetMovementRules(db: Database, args: MovementArgs) {
   const jv = validateJurisdiction(args.jurisdiction);
   if (!jv.valid) return jv.error;
 
-  let sql = 'SELECT * FROM movement_rules WHERE LOWER(species) = LOWER(?) AND jurisdiction = ?';
-  const params: unknown[] = [args.species, jv.jurisdiction];
+  const sw = speciesWhereClause(args.species);
+
+  const baseSql = `SELECT * FROM movement_rules WHERE ${sw.clause} AND jurisdiction = ?`;
+  const baseParams: unknown[] = [...sw.params, jv.jurisdiction];
+
+  let sql = baseSql;
+  const params = [...baseParams];
 
   if (args.rule_type) {
     sql += ' AND LOWER(rule_type) = LOWER(?)';
@@ -22,24 +49,26 @@ export function handleGetMovementRules(db: Database, args: MovementArgs) {
 
   sql += ' ORDER BY rule_type';
 
-  const results = db.all<{
-    id: number; species: string; rule_type: string; description: string;
-  }>(sql, params);
+  const results = db.all<MovementRow>(sql, params);
 
-  if (results.length === 0) {
-    return {
-      error: 'not_found',
-      message: `No movement rules found for species '${args.species}'` +
-        (args.rule_type ? ` rule type '${args.rule_type}'` : '') + '.',
-    };
+  if (results.length > 0) {
+    return formatResult(results, args.species, jv.jurisdiction);
+  }
+
+  // Fallback: species matched but rule_type missed
+  if (args.rule_type) {
+    const fallback = db.all<MovementRow>(
+      baseSql + ' ORDER BY rule_type', baseParams,
+    );
+    if (fallback.length > 0) {
+      const available = [...new Set(fallback.map(d => d.rule_type))];
+      return formatResult(fallback, args.species, jv.jurisdiction,
+        `rule_type '${args.rule_type}' not found. Available: ${available.join(', ')}. Showing all results.`);
+    }
   }
 
   return {
-    species: args.species,
-    rule_type_filter: args.rule_type ?? null,
-    jurisdiction: jv.jurisdiction,
-    results_count: results.length,
-    results,
-    _meta: buildMeta(),
+    error: 'not_found',
+    message: `No movement rules found for species '${args.species}'. Available species: ${knownSpeciesList()}.`,
   };
 }
