@@ -1,4 +1,5 @@
 import { buildMeta } from '../metadata.js';
+import { buildCitation } from '../citation.js';
 import { validateJurisdiction } from '../jurisdiction.js';
 import { speciesWhereClause, knownSpeciesList } from '../species-aliases.js';
 import type { Database } from '../db.js';
@@ -27,6 +28,12 @@ function formatResult(
     results_count: results.length,
     results,
     _meta: buildMeta(),
+    _citation: buildCitation(
+      `CH Housing Requirements — ${species}`,
+      `Swiss housing requirements for ${species}`,
+      'get_housing_requirements',
+      { species },
+    ),
   };
   if (hint) out._hint = hint;
   return out;

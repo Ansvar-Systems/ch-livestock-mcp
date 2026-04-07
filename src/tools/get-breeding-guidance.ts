@@ -1,4 +1,5 @@
 import { buildMeta } from '../metadata.js';
+import { buildCitation } from '../citation.js';
 import { validateJurisdiction } from '../jurisdiction.js';
 import { speciesWhereClause, knownSpeciesList } from '../species-aliases.js';
 import type { Database } from '../db.js';
@@ -26,6 +27,12 @@ function formatResult(
     results_count: results.length,
     results,
     _meta: buildMeta(),
+    _citation: buildCitation(
+      `CH Breeding Guidance — ${species}`,
+      `Swiss breeding guidance for ${species}`,
+      'get_breeding_guidance',
+      { species },
+    ),
   };
   if (hint) out._hint = hint;
   return out;
