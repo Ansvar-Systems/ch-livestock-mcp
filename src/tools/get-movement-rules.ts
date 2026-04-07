@@ -1,4 +1,5 @@
 import { buildMeta } from '../metadata.js';
+import { buildCitation } from '../citation.js';
 import { validateJurisdiction } from '../jurisdiction.js';
 import { speciesWhereClause, knownSpeciesList } from '../species-aliases.js';
 import type { Database } from '../db.js';
@@ -25,6 +26,12 @@ function formatResult(
     results_count: results.length,
     results,
     _meta: buildMeta(),
+    _citation: buildCitation(
+      `CH Movement Rules — ${species}`,
+      `Swiss movement rules for ${species}`,
+      'get_movement_rules',
+      { species },
+    ),
   };
   if (hint) out._hint = hint;
   return out;
