@@ -17,7 +17,6 @@
     "test:watch": "vitest",
     "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
-    "build:db": "tsx scripts/build-db.ts",
     "test:contract": "echo \"No contract tests yet\" && exit 0"
   },
   "keywords": [
